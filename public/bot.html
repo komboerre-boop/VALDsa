@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bot Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    body { overflow-x: hidden; overflow-y: auto; }
+    .console-page { align-items: stretch; min-height: auto; padding: 0 0 2rem; }
+    .console-box { width: 100%; max-width: 1280px; min-height: auto; padding: 2rem; display: flex; flex-direction: column; gap: 1.25rem; }
+    .console-shell { display: flex; flex-direction: column; flex: 1; min-height: 0; background: rgba(255,255,255,0.03); border: 1px solid rgba(126,182,255,0.18); border-radius: 1rem; }
+    .console-header { padding: 1.5rem; display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; border-bottom: 1px solid rgba(126,182,255,0.14); }
+    .console-title { font-size: 1.3rem; font-weight: 700; line-height: 1.3; }
+    .console-subtitle { margin-top: 0.45rem; color: #b0b0b0; font-size: 0.75rem; line-height: 1.7; }
+    .fact-row { padding: 1rem 1.5rem; display: flex; flex-wrap: wrap; gap: 0.75rem; border-bottom: 1px solid rgba(126,182,255,0.14); }
+    .fact { padding: 0.72rem 1rem; border-radius: 999px; background: rgba(255,255,255,0.04); border: 1px solid rgba(126,182,255,0.14); color: #dbe6f8; font-size: 0.71rem; }
+    .action-row { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+    .log-area { flex: 1; min-height: 0; max-height: 58vh; overflow: auto; padding: 1.2rem 1.5rem 0.6rem; display: flex; flex-direction: column; gap: 0.8rem; }
+    .log-area::-webkit-scrollbar { width: 6px; }
+    .log-area::-webkit-scrollbar-thumb { background: rgba(126,182,255,0.24); border-radius: 999px; }
+    .log-entry { display: grid; grid-template-columns: 78px 58px minmax(0, 1fr); gap: 0.8rem; align-items: start; padding: 0.95rem 1rem; border-radius: 1rem; background: rgba(255,255,255,0.025); border: 1px solid rgba(126,182,255,0.08); }
+    .log-time { color: #8590a1; font-size: 0.67rem; padding-top: 0.25rem; }
+    .log-badge { text-align: center; border-radius: 999px; padding: 0.42rem 0.52rem; font-size: 0.63rem; font-weight: 700; }
+    .log-text { font-size: 0.74rem; line-height: 1.75; word-break: break-word; }
+    .log-info .log-badge { color: #8dc8ff; background: rgba(141,200,255,0.14); } .log-info .log-text { color: #8dc8ff; }
+    .log-warn .log-badge { color: #f5b84f; background: rgba(245,184,79,0.16); } .log-warn .log-text { color: #ffd995; }
+    .log-error .log-badge { color: #ff6678; background: rgba(255,102,120,0.16); } .log-error .log-text { color: #ffbec7; }
+    .log-success .log-badge { color: #39d98a; background: rgba(57,217,138,0.16); } .log-success .log-text { color: #9ceac1; }
+    .log-system .log-badge { color: #cad3df; background: rgba(255,255,255,0.08); } .log-system .log-text { color: #dde4ee; }
+    .log-action .log-badge { color: #d3e2ff; background: rgba(126,182,255,0.12); } .log-action .log-text { color: #dce7ff; }
+    .log-ban .log-badge { color: #ff6678; background: rgba(255,102,120,0.2); } .log-ban .log-text { color: #ffd8dd; }
+    .chat-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.75rem; padding: 1rem 1.5rem 1.5rem; border-top: 1px solid rgba(126,182,255,0.14); }
+    .chat-input { width: 100%; padding: 0.95rem 1rem; border-radius: 0.8rem; border: 1px solid rgba(126,182,255,0.18); background: rgba(255,255,255,0.05); color: #fff; font-family: inherit; font-size: 0.8rem; outline: none; }
+    .chat-input:focus { border-color: rgba(126,182,255,0.45); box-shadow: 0 0 0 3px rgba(126,182,255,0.08); }
+    .chat-input::placeholder { color: rgba(255,255,255,0.35); }
+    .empty { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 0.8rem; color: #b0b0b0; text-align: center; padding: 2rem; }
+    @media (max-width: 780px) {
+      .console-box { min-height: auto; padding: 1.25rem; }
+      .log-area { max-height: none; }
+      .chat-row { grid-template-columns: 1fr; }
+      .log-entry { grid-template-columns: 1fr; }
+    }
+  </style>
+  <link rel="stylesheet" href="/theme.css">
+</head>
+<body>
+  <div class="custom-cursor"></div>
+  <canvas id="particles-canvas"></canvas>
+
+  <div class="container">
+    <header class="header">
+      <nav class="nav">
+        <a href="/" class="logo">CakeWorld Bot Console</a>
+        <ul class="nav-links">
+          <li><a href="/relics.html#view-settings" class="back-link">Настройки</a></li>
+          <li><a href="/relics.html" class="back-link">Лидерборд</a></li>
+          <li><a href="/" class="back-link">Назад к панели</a></li>
+        </ul>
+      </nav>
+    </header>
+
+    <main class="panel-container console-page">
+      <div class="panel-box console-box">
+        <div class="console-shell" id="console-shell">
+          <div class="empty" id="empty">
+            <strong>Бот не найден</strong>
+            <div>Проверь `id` в адресе или вернись на главную панель.</div>
+          </div>
+
+          <div id="console-view" style="display:none; flex-direction:column; min-height:0; height:100%;">
+            <div class="console-header">
+              <div>
+                <div class="console-title" id="bot-title">-</div>
+                <div class="console-subtitle" id="bot-subtitle">-</div>
+              </div>
+              <div class="action-row">
+                <button class="btn" type="button" onclick="goBack()">Назад</button>
+                <button class="btn" type="button" onclick="sendAfk()">AFK</button>
+                <button class="btn" type="button" onclick="reconnectBot()">Реконнект</button>
+                <button class="btn btn-secondary" type="button" onclick="deleteBot()">Удалить</button>
+              </div>
+            </div>
+            <div class="fact-row" id="fact-row"></div>
+            <div class="log-area" id="log-area"></div>
+            <div class="chat-row">
+              <input class="chat-input" id="chat-input" placeholder="/команда или сообщение">
+              <button class="btn btn-primary" type="button" onclick="sendChat()">Отправить</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="/app.js"></script>
+  <script>
+    const socket = io();
+    const BOT_LOG_LIMIT = 60;
+    const params = new URLSearchParams(window.location.search);
+    const botId = Number(params.get('id'));
+    const state = {
+      bot: null,
+      uptime: 0
+    };
+
+    const STATUS_LABELS = {
+      online: 'Онлайн',
+      offline: 'Офлайн',
+      connecting: 'Подключение',
+      error: 'Ошибка',
+      banned: 'Забанен'
+    };
+    const STAGE_LABELS = {
+      queued: 'Очередь',
+      connecting: 'Подключение',
+      auth: 'Авторизация',
+      lobby: 'Лобби',
+      server: 'Сервер',
+      afk: 'AFK-пул',
+      farming: 'Фарм наград',
+      banned: 'Забанен',
+      offline: 'Офлайн',
+      error: 'Ошибка'
+    };
+
+    const LOG_LABELS = {
+      info: 'INFO',
+      warn: 'WARN',
+      error: 'ERR',
+      success: 'OK',
+      system: 'SYS',
+      action: 'CMD',
+      ban: 'BAN'
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('chat-input').addEventListener('keydown', event => {
+        if (event.key === 'Enter') sendChat();
+      });
+      loadBot();
+      bindSocket();
+    });
+
+    function bindSocket() {
+      socket.on('stats:live', payload => {
+        const item = (payload.bots || []).find(entry => entry.id === botId);
+        state.uptime = item ? item.uptime : state.uptime;
+        renderFacts();
+      });
+
+      socket.on('bot:stage', ({ id, stage, status }) => {
+        if (id !== botId || !state.bot) return;
+        state.bot.stage = stage;
+        state.bot.status = status;
+        renderHeader();
+        renderFacts();
+      });
+
+      socket.on('bot:log', entry => {
+        if (entry.id !== botId || !state.bot) return;
+        state.bot.logs = state.bot.logs || [];
+        state.bot.logs.push({ type: entry.type, text: entry.text, ts: entry.ts });
+        if (state.bot.logs.length > BOT_LOG_LIMIT) {
+          state.bot.logs.splice(0, state.bot.logs.length - BOT_LOG_LIMIT);
+        }
+        appendLog(entry);
+      });
+
+      socket.on('bot:relics', ({ id, relics }) => {
+        if (id !== botId || !state.bot) return;
+        state.bot.relics = relics || {};
+        renderFacts();
+      });
+      socket.on('bot:riliky', ({ id, riliky }) => {
+        if (id !== botId || !state.bot) return;
+        state.bot.riliky = Number.isFinite(riliky) ? riliky : null;
+        renderFacts();
+      });
+
+      socket.on('bot:removed', ({ id }) => {
+        if (id !== botId) return;
+        state.bot = null;
+        render();
+      });
+    }
+
+    async function loadBot() {
+      if (!Number.isFinite(botId) || botId <= 0) {
+        render();
+        return;
+      }
+
+      try {
+        const bots = await fetchJson('/api/bots');
+        state.bot = bots.find(bot => bot.id === botId) || null;
+        if (state.bot?.logs) state.bot.logs = state.bot.logs.slice(-BOT_LOG_LIMIT);
+        state.uptime = getBotUptime();
+        render();
+      } catch (error) {
+        if (window.Toast) Toast.error(error.message, 'Ошибка загрузки');
+      }
+    }
+
+    function render() {
+      const empty = document.getElementById('empty');
+      const view = document.getElementById('console-view');
+
+      if (!state.bot) {
+        empty.style.display = 'flex';
+        view.style.display = 'none';
+        return;
+      }
+
+      empty.style.display = 'none';
+      view.style.display = 'flex';
+      renderHeader();
+      renderFacts();
+      renderLogs();
+    }
+
+    function renderHeader() {
+      if (!state.bot) return;
+      const stage = state.bot.stage || state.bot.status;
+      document.getElementById('bot-title').textContent = state.bot.config.username;
+      document.getElementById('bot-subtitle').textContent =
+        `${state.bot.config.host}:${state.bot.config.port || 25565} · v${state.bot.config.version || '1.20.1'} · ${STAGE_LABELS[stage] || STATUS_LABELS[state.bot.status] || stage}`;
+    }
+
+    function renderFacts() {
+      if (!state.bot) return;
+      const container = document.getElementById('fact-row');
+      const facts = [
+        `ID: ${state.bot.id}`,
+        `Uptime: ${fmtUptime(getBotUptime())}`,
+        `Рилики: ${fmtRiliky(state.bot)}`,
+        `AutoAuth: ${state.bot.config.autoAuth === false ? 'off' : 'on'}`,
+        `AutoNav: ${state.bot.config.autoNav === false ? 'off' : 'on'}`,
+        `AutoAFK: ${state.bot.config.autoAfk === false ? 'off' : 'on'}`,
+        `AutoFree: ${state.bot.config.autoFree === false ? 'off' : 'on'}`,
+        `AutoReconnect: ${state.bot.config.autoReconnect === false ? 'off' : 'on'}`
+      ];
+      container.innerHTML = facts.map(item => `<div class="fact">${esc(item)}</div>`).join('');
+    }
+
+    function renderLogs() {
+      const area = document.getElementById('log-area');
+      area.innerHTML = '';
+      (state.bot?.logs || []).forEach(entry => appendLog(entry, false));
+      area.scrollTop = area.scrollHeight;
+    }
+
+    function appendLog(entry, autoScroll = true) {
+      const area = document.getElementById('log-area');
+      const stickToBottom = area.scrollHeight - area.clientHeight - area.scrollTop < 40;
+      const type = entry.type || 'info';
+      const node = document.createElement('div');
+      node.className = `log-entry log-${type}`;
+      node.innerHTML = `
+        <div class="log-time">${esc(new Date(entry.ts || Date.now()).toLocaleTimeString('ru-RU', { hour12: false }))}</div>
+        <div class="log-badge">${esc(LOG_LABELS[type] || type)}</div>
+        <div class="log-text">${esc(entry.text)}</div>
+      `;
+      area.appendChild(node);
+      if (autoScroll && stickToBottom) area.scrollTop = area.scrollHeight;
+    }
+
+    async function sendChat() {
+      if (!state.bot) return;
+      const input = document.getElementById('chat-input');
+      const message = input.value.trim();
+      if (!message) return;
+
+      try {
+        await fetchJson(`/api/bots/${state.bot.id}/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message })
+        });
+        input.value = '';
+      } catch (error) {
+        if (window.Toast) Toast.error(error.message, 'Команда не отправлена');
+      }
+    }
+
+    async function reconnectBot() {
+      if (!state.bot) return;
+      try {
+        await fetchJson(`/api/bots/${state.bot.id}/reconnect`, { method: 'POST' });
+        if (window.Toast) Toast.success(`Запрос отправлен для ${state.bot.config.username}`, 'Реконнект');
+      } catch (error) {
+        if (window.Toast) Toast.error(error.message, 'Реконнект не выполнен');
+      }
+    }
+
+    async function sendAfk() {
+      if (!state.bot) return;
+      try {
+        await fetchJson(`/api/bots/${state.bot.id}/afk`, { method: 'POST' });
+        if (window.Toast) Toast.success(`AFK-команда отправлена для ${state.bot.config.username}`, 'AFK');
+      } catch (error) {
+        if (window.Toast) Toast.error(error.message, 'AFK не выполнен');
+      }
+    }
+
+    async function deleteBot() {
+      if (!state.bot) return;
+      if (!window.confirm(`Удалить бота ${state.bot.config.username}?`)) return;
+
+      try {
+        await fetchJson(`/api/bots/${state.bot.id}`, { method: 'DELETE' });
+        goBack();
+      } catch (error) {
+        if (window.Toast) Toast.error(error.message, 'Не удалось удалить');
+      }
+    }
+
+    function getBotUptime() {
+      if (state.uptime) return state.uptime;
+      if (state.bot?.connectedAt) {
+        return Math.max(0, Math.floor((Date.now() - state.bot.connectedAt) / 1000));
+      }
+      return 0;
+    }
+
+    function fmtUptime(seconds) {
+      if (seconds < 60) return `${seconds}s`;
+      if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+      return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+    }
+
+    function fmtRiliky(bot) {
+      if (Number.isFinite(bot?.riliky)) {
+        return new Intl.NumberFormat('ru-RU').format(bot.riliky);
+      }
+      if (Number.isFinite(bot?.relics?.value)) {
+        return `${new Intl.NumberFormat('ru-RU').format(bot.relics.value)}${bot?.relics?.stale ? '?' : ''}`;
+      }
+      return '—';
+    }
+
+    async function fetchJson(url, options) {
+      const response = await fetch(url, options);
+      let payload = {};
+      try {
+        payload = await response.json();
+      } catch {
+        payload = {};
+      }
+      if (!response.ok) throw new Error(payload.error || 'Неизвестная ошибка');
+      return payload;
+    }
+
+    function esc(value) {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function goBack() {
+      window.location.href = '/';
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,1702 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CakeWorld Bot Manager</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="/socket.io/socket.io.js"></script>
+<style>
+/* ══════════════════════════════════════════
+   BASE — точно как caketools
+══════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Unbounded', sans-serif;
+  background: #000;
+  color: #fff;
+  min-height: 100vh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  cursor: none;
+  opacity: 0;
+  animation: pageLoad .8s ease forwards;
+}
+@keyframes pageLoad { to { opacity: 1; } }
+
+.custom-cursor {
+  position: fixed; width: 12px; height: 12px;
+  background: #7EB6FF; border-radius: 50%;
+  pointer-events: none; z-index: 99999;
+  transition: transform .15s ease;
+  transform: translate(-50%,-50%);
+}
+.custom-cursor.hover { transform: translate(-50%,-50%) scale(2.2); background: rgba(126,182,255,.55); }
+a,button,input,select,textarea,label { cursor: none !important; }
+
+#particles-canvas {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+}
+
+.container {
+  max-width: 1440px; margin: 0 auto; padding: 0 2rem;
+  position: relative; z-index: 1;
+}
+
+/* ══════════════════════════════════════════
+   GRADIENTS & TEXT
+══════════════════════════════════════════ */
+.gradient-text {
+  background: linear-gradient(to right, #7EB6FF 0%, #0010BD 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+
+/* ══════════════════════════════════════════
+   HEADER / NAV
+══════════════════════════════════════════ */
+.header {
+  padding: 1.5rem 0;
+  opacity: 0; animation: slideDown .8s ease .3s forwards;
+  position: relative; z-index: 100;
+  border-bottom: 1px solid rgba(126,182,255,.1);
+}
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.nav { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; flex-wrap: wrap; }
+.logo {
+  font-size: 1.1rem; font-weight: 700;
+  background: linear-gradient(to right, #7EB6FF 0%, #0010BD 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  text-decoration: none;
+}
+
+/* Stats row */
+.stats-row { display: flex; gap: 1rem; flex-wrap: wrap; flex: 1; justify-content: center; }
+.stat-pill {
+  display: flex; align-items: center; gap: .6rem;
+  padding: .45rem 1rem;
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(126,182,255,.15);
+  border-radius: 999px;
+  font-size: .7rem; color: #b0b0b0;
+  transition: border-color .3s;
+}
+.stat-pill:hover { border-color: rgba(126,182,255,.35); }
+.stat-pill b { color: #7EB6FF; font-weight: 600; }
+.sdot { width: 7px; height: 7px; border-radius: 50%; }
+.sdot.g  { background: #39d98a; box-shadow: 0 0 6px rgba(57,217,138,.5); }
+.sdot.r  { background: #ff6678; box-shadow: 0 0 6px rgba(255,102,120,.4); }
+.sdot.y  { background: #f5b84f; }
+.sdot.bl { background: #7EB6FF; }
+
+.nav-btns { display: flex; gap: .75rem; }
+
+/* ══════════════════════════════════════════
+   BUTTONS — точно из caketools
+══════════════════════════════════════════ */
+.btn {
+  padding: .5rem 1.5rem; font-size: .8rem; font-weight: 500;
+  border-radius: 1.5rem; border: none; cursor: none !important;
+  transition: all .25s; display: inline-flex; align-items: center; gap: .5rem;
+  font-family: 'Unbounded', sans-serif; position: relative; overflow: hidden;
+  text-decoration: none;
+}
+.btn-primary {
+  background: linear-gradient(to bottom right, rgba(255,255,255,.1), rgba(255,255,255,.03));
+  color: #fff; border: 1px solid rgba(100,55,179,.18);
+}
+.btn-primary:hover { background: linear-gradient(to bottom right, rgba(255,255,255,.15), rgba(255,255,255,.05)); transform: translateY(-2px); }
+.btn-secondary {
+  background: rgba(255,255,255,.05); color: #fff; border: 1px solid rgba(255,255,255,.12);
+}
+.btn-secondary:hover { background: rgba(255,255,255,.08); transform: translateY(-2px); }
+.btn-danger { background: rgba(255,71,87,.12); color: #ff6678; border: 1px solid rgba(255,71,87,.25); }
+.btn-danger:hover { background: rgba(255,71,87,.2); transform: translateY(-2px); }
+.btn:active { transform: scale(.95) !important; }
+.ripple {
+  position: absolute; border-radius: 50%; background: rgba(255,255,255,.35);
+  transform: scale(0); animation: rippleAnim .6s ease-out; pointer-events: none;
+}
+@keyframes rippleAnim { to { transform: scale(4); opacity: 0; } }
+
+/* ══════════════════════════════════════════
+   MAIN LAYOUT
+══════════════════════════════════════════ */
+.dashboard {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 1.5rem;
+  padding: 1.5rem 0 1.5rem;
+  min-height: calc(100vh - 90px);
+  height: auto;
+  overflow: visible;
+  align-items: start;
+  opacity: 0; animation: fadeInUp .6s ease .5s forwards;
+}
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ══════════════════════════════════════════
+   CARDS (glass caketools style)
+══════════════════════════════════════════ */
+.card {
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(126,182,255,.15);
+  border-radius: 1rem;
+  transition: border-color .3s;
+}
+.card:hover { border-color: rgba(126,182,255,.25); }
+.card-title {
+  font-size: .75rem; font-weight: 600; color: #7EB6FF; letter-spacing: .05em; text-transform: uppercase;
+}
+
+/* ══════════════════════════════════════════
+   SIDEBAR — список ботов
+══════════════════════════════════════════ */
+.sidebar {
+  display: flex; flex-direction: column; overflow: hidden; gap: 0;
+}
+.sidebar-hdr {
+  padding: 1rem 1.25rem .75rem;
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid rgba(126,182,255,.1);
+  flex-shrink: 0;
+}
+.sidebar-hdr .card-title { margin: 0; }
+.bot-counter {
+  width: 28px; height: 28px; border-radius: .5rem; display: grid; place-items: center;
+  border: 1px solid rgba(126,182,255,.2); color: #7EB6FF; font-size: .7rem; font-weight: 700;
+}
+.bot-list { flex: 1; overflow-y: auto; padding: .75rem; display: flex; flex-direction: column; gap: .5rem; }
+.bot-list::-webkit-scrollbar { width: 4px; }
+.bot-list::-webkit-scrollbar-thumb { background: rgba(126,182,255,.2); border-radius: 999px; }
+
+/* Bot item */
+.bot-item {
+  padding: .85rem 1rem; border-radius: .75rem;
+  border: 1px solid rgba(126,182,255,.1);
+  background: rgba(255,255,255,.02);
+  cursor: none !important;
+  transition: transform .2s, border-color .2s, background .2s;
+}
+.bot-item:hover { transform: translateY(-1px); border-color: rgba(126,182,255,.3); background: rgba(255,255,255,.04); }
+.bot-item.active { border-color: rgba(126,182,255,.45); background: rgba(126,182,255,.07); }
+.bot-item.banned { border-color: rgba(255,102,120,.3); }
+
+.bi-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: .6rem; }
+.status-badge {
+  display: inline-flex; align-items: center; gap: .45rem;
+  font-size: .62rem; color: #b0b0b0;
+}
+.status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.status-dot.online     { background: #39d98a; box-shadow: 0 0 10px rgba(57,217,138,.4); }
+.status-dot.offline    { background: rgba(255,255,255,.3); }
+.status-dot.connecting { background: #f5b84f; animation: puls .8s infinite alternate; }
+.status-dot.error      { background: #ff6678; }
+.status-dot.banned     { background: #ff6678; box-shadow: 0 0 10px rgba(255,102,120,.5); }
+@keyframes puls { to { opacity: .15; } }
+
+.bi-del {
+  width: 26px; height: 26px; border-radius: .5rem;
+  border: 1px solid rgba(255,255,255,.08); background: rgba(255,255,255,.03);
+  color: #b0b0b0; font-size: .9rem;
+  display: grid; place-items: center;
+  transition: all .2s; opacity: 0;
+}
+.bot-item:hover .bi-del { opacity: 1; }
+.bi-del:hover { color: #ff6678; border-color: rgba(255,102,120,.3); }
+
+.bi-name { font-size: .82rem; font-weight: 600; margin-bottom: .3rem; word-break: break-word; }
+.bi-meta { font-size: .65rem; color: #b0b0b0; display: flex; flex-direction: column; gap: .2rem; }
+
+/* Stage chip */
+.stage-chip {
+  display: inline-flex; align-items: center; gap: .35rem;
+  padding: .2rem .55rem; border-radius: 999px; font-size: .6rem; font-weight: 600;
+  border: 1px solid;
+}
+.stage-chip.connecting { color: #f5b84f; border-color: rgba(245,184,79,.3); background: rgba(245,184,79,.08); }
+.stage-chip.queued     { color: #9eb7d9; border-color: rgba(158,183,217,.28); background: rgba(158,183,217,.08); }
+.stage-chip.auth       { color: #c792ea; border-color: rgba(199,146,234,.3); background: rgba(199,146,234,.08); }
+.stage-chip.lobby      { color: #7EB6FF; border-color: rgba(126,182,255,.3); background: rgba(126,182,255,.08); }
+.stage-chip.server     { color: #7EB6FF; border-color: rgba(126,182,255,.3); background: rgba(126,182,255,.08); }
+.stage-chip.afk        { color: #39d98a; border-color: rgba(57,217,138,.3); background: rgba(57,217,138,.08); }
+.stage-chip.farming    { color: #39d98a; border-color: rgba(57,217,138,.3); background: rgba(57,217,138,.08); }
+.stage-chip.banned     { color: #ff6678; border-color: rgba(255,102,120,.3); background: rgba(255,102,120,.1); }
+.stage-chip.offline    { color: #888; border-color: rgba(136,136,136,.25); background: rgba(136,136,136,.06); }
+.stage-chip.error      { color: #ff6678; border-color: rgba(255,102,120,.3); background: rgba(255,102,120,.08); }
+
+.no-bots {
+  padding: 2rem 1rem; text-align: center; color: #b0b0b0;
+  font-size: .72rem; line-height: 1.8;
+}
+
+/* ══════════════════════════════════════════
+   RIGHT PANEL
+══════════════════════════════════════════ */
+.right-panel { display: flex; flex-direction: column; overflow: visible; min-height: 0; }
+
+/* Empty state */
+.empty-state {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: .75rem; color: #b0b0b0; font-size: .8rem;
+}
+.empty-icon { font-size: 3rem; opacity: .15; }
+
+/* Detail view */
+.detail-view { flex: 1; display: none; flex-direction: column; overflow: visible; min-height: 0; }
+
+.detail-hdr {
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid rgba(126,182,255,.12);
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem;
+  flex-wrap: wrap; flex-shrink: 0;
+}
+.detail-name { font-size: 1.2rem; font-weight: 700; }
+.detail-sub  { font-size: .7rem; color: #b0b0b0; margin-top: .35rem; line-height: 1.6; }
+.action-row  { display: flex; gap: .5rem; flex-wrap: wrap; }
+
+/* Bot info strip */
+.bot-info-strip {
+  padding: .75rem 1.5rem;
+  border-bottom: 1px solid rgba(126,182,255,.1);
+  display: flex; gap: .75rem; flex-wrap: wrap; align-items: center;
+  flex-shrink: 0;
+}
+.info-tag {
+  padding: .3rem .75rem; border-radius: 999px; font-size: .63rem;
+  background: rgba(255,255,255,.04); border: 1px solid rgba(126,182,255,.14);
+  color: #d8e3f7;
+}
+.info-tag.hi { border-color: rgba(57,217,138,.3); color: #39d98a; }
+.free-countdown { font-size: .63rem; color: #f5b84f; font-weight: 600; }
+
+/* ══════════════════════════════════════════
+   CONSOLE — терминал
+══════════════════════════════════════════ */
+.console {
+  flex: 1; min-height: 0; overflow-y: auto;
+  max-height: 58vh;
+  padding: 1rem 1.5rem;
+  font-family: 'Courier New', 'Consolas', monospace;
+  font-size: .72rem; line-height: 1.8;
+  background: rgba(0,0,0,.3);
+}
+.console::-webkit-scrollbar { width: 4px; }
+.console::-webkit-scrollbar-thumb { background: rgba(126,182,255,.2); border-radius: 999px; }
+
+.log-line {
+  display: grid;
+  grid-template-columns: 56px 44px 1fr;
+  gap: .6rem;
+  padding: .18rem .35rem;
+  border-radius: .35rem;
+  transition: background .1s;
+}
+.log-line:hover { background: rgba(255,255,255,.025); }
+.log-ts   { color: rgba(255,255,255,.2); font-size: .65rem; padding-top: 1px; }
+.log-tag  {
+  text-align: center; border-radius: .25rem; padding: .1rem 0;
+  font-size: .6rem; font-weight: 700; letter-spacing: .03em; flex-shrink: 0;
+  font-family: 'Unbounded', sans-serif;
+}
+.log-msg  { word-break: break-word; }
+
+.log-line.log-info    .log-tag { color: #8dc8ff; background: rgba(141,200,255,.12); }
+.log-line.log-info    .log-msg { color: #8dc8ff; }
+.log-line.log-warn    .log-tag { color: #f5b84f; background: rgba(245,184,79,.14); }
+.log-line.log-warn    .log-msg { color: #ffd995; }
+.log-line.log-error   .log-tag { color: #ff6678; background: rgba(255,102,120,.14); }
+.log-line.log-error   .log-msg { color: #ffbcc6; }
+.log-line.log-success .log-tag { color: #39d98a; background: rgba(57,217,138,.14); }
+.log-line.log-success .log-msg { color: #98e8bf; }
+.log-line.log-system  .log-tag { color: #c7d0dc; background: rgba(255,255,255,.07); }
+.log-line.log-system  .log-msg { color: #dce2ec; }
+.log-line.log-action  .log-tag { color: #c6d8ff; background: rgba(126,182,255,.1);  }
+.log-line.log-action  .log-msg { color: #d6e5ff; }
+.log-line.log-ban     .log-tag { color: #ff6678; background: rgba(255,102,120,.22); animation: blink .4s 4; }
+.log-line.log-ban     .log-msg { color: #ff6678; font-weight: 700; }
+@keyframes blink { 50% { opacity: .1; } }
+
+/* Input bar */
+.cmd-bar {
+  display: grid; grid-template-columns: minmax(0,1fr) auto;
+  gap: .75rem; padding: 1rem 1.5rem 1.25rem;
+  border-top: 1px solid rgba(126,182,255,.12);
+  flex-shrink: 0;
+}
+.cmd-input {
+  width: 100%; padding: .8rem 1rem;
+  border-radius: .75rem; border: 1px solid rgba(126,182,255,.18);
+  background: rgba(255,255,255,.05); color: #fff;
+  font-family: 'Unbounded', sans-serif; font-size: .75rem; outline: none;
+  transition: all .3s;
+}
+.cmd-input:focus { border-color: #7EB6FF; background: rgba(255,255,255,.07); box-shadow: 0 0 0 3px rgba(126,182,255,.1); }
+.cmd-input::placeholder { color: rgba(255,255,255,.3); }
+
+@media (max-width: 860px) {
+  .dashboard { grid-template-columns: 1fr; }
+  .sidebar { overflow: visible; }
+  .bot-list { max-height: 36vh; }
+  .console { max-height: none; }
+}
+
+/* ══════════════════════════════════════════
+   MODAL
+══════════════════════════════════════════ */
+.overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.6);
+  backdrop-filter: blur(10px); display: none; align-items: center; justify-content: center;
+  z-index: 10000; padding: 1.5rem;
+}
+.overlay.open { display: flex; }
+
+/* ── Broadcast console ── */
+.bc-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.75);
+  backdrop-filter: blur(12px); display: none; align-items: flex-end; justify-content: center;
+  z-index: 10500; padding: 1.5rem;
+}
+.bc-overlay.open { display: flex; }
+.bc-card {
+  width: min(860px,100%); height: min(520px,80vh);
+  background: rgba(8,8,18,.95);
+  border: 1px solid rgba(126,182,255,.25);
+  border-radius: 1.25rem;
+  box-shadow: 0 -10px 60px rgba(0,0,0,.5);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.bc-hdr {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: .9rem 1.25rem; border-bottom: 1px solid rgba(126,182,255,.12);
+  flex-shrink: 0;
+}
+.bc-title { font-size: .8rem; font-weight: 700; color: #7EB6FF; display: flex; align-items: center; gap: .6rem; }
+.bc-badge {
+  min-width: 20px; height: 20px; padding: 0 5px; border-radius: 999px;
+  background: rgba(126,182,255,.2); color: #7EB6FF; font-size: .6rem; font-weight: 700;
+  display: grid; place-items: center;
+}
+.bc-log {
+  flex: 1; overflow-y: auto; padding: .75rem 1rem;
+  font-size: .7rem; line-height: 1.8; font-family: 'Courier New', monospace;
+}
+.bc-log::-webkit-scrollbar { width: 4px; }
+.bc-log::-webkit-scrollbar-thumb { background: rgba(126,182,255,.2); border-radius: 999px; }
+.bc-log-line { padding: 1px 0; word-break: break-all; }
+.bc-log-line .bc-who { color: #7EB6FF; }
+.bc-log-line .bc-msg { color: #ddd; }
+.bc-log-line .bc-ts  { color: #555; font-size: .62rem; }
+.bc-footer {
+  display: flex; gap: .75rem; padding: .75rem 1rem;
+  border-top: 1px solid rgba(126,182,255,.12); flex-shrink: 0;
+}
+.bc-input {
+  flex: 1; background: rgba(255,255,255,.05); border: 1px solid rgba(126,182,255,.2);
+  border-radius: .6rem; color: #fff; padding: .55rem .9rem;
+  font-family: 'Unbounded', sans-serif; font-size: .75rem; outline: none;
+  transition: border-color .25s;
+}
+.bc-input:focus { border-color: rgba(126,182,255,.5); }
+
+.modal-card {
+  width: min(680px,100%); padding: 2rem;
+  background: rgba(10,10,20,.9);
+  border: 1px solid rgba(126,182,255,.25);
+  border-radius: 1.25rem;
+  box-shadow: 0 20px 60px rgba(0,0,0,.6);
+  max-height: 90vh; overflow-y: auto;
+}
+.modal-card::-webkit-scrollbar { width: 4px; }
+.modal-card::-webkit-scrollbar-thumb { background: rgba(126,182,255,.2); border-radius: 999px; }
+
+.modal-title { font-size: 1.4rem; font-weight: 700; margin-bottom: .4rem; }
+.modal-sub   { font-size: .72rem; color: #b0b0b0; line-height: 1.7; margin-bottom: 1.5rem; }
+
+.form-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 1rem; }
+.field { display: flex; flex-direction: column; gap: .4rem; }
+.field.full { grid-column: 1/-1; }
+.field label { font-size: .7rem; color: #d7e2f3; font-weight: 500; }
+.field-input, .field-select {
+  width: 100%; padding: .8rem 1rem;
+  border-radius: .75rem; border: 1px solid rgba(126,182,255,.2);
+  background: rgba(255,255,255,.05); color: #fff;
+  font-family: 'Unbounded', sans-serif; font-size: .75rem; outline: none;
+  transition: all .3s;
+}
+.field-input:focus, .field-select:focus {
+  border-color: #7EB6FF; background: rgba(255,255,255,.07);
+  box-shadow: 0 0 0 3px rgba(126,182,255,.1);
+}
+.field-input::placeholder { color: rgba(255,255,255,.3); }
+.field-select option { background: #0a0a14; }
+
+/* Batch slider */
+.batch-wrap { display: flex; align-items: center; gap: .75rem; grid-column: 1/-1; }
+.batch-wrap label { font-size: .7rem; color: #d7e2f3; white-space: nowrap; min-width: 80px; }
+input[type=range] {
+  flex: 1; accent-color: #7EB6FF;
+  background: transparent; cursor: none !important;
+}
+.batch-num {
+  min-width: 42px; text-align: center; padding: .35rem .6rem;
+  border-radius: .5rem; border: 1px solid rgba(126,182,255,.2);
+  background: rgba(126,182,255,.08); color: #7EB6FF; font-size: .8rem; font-weight: 700;
+}
+
+/* Checkboxes */
+.checks-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: .75rem; grid-column: 1/-1; margin-top: .25rem; }
+.check-card {
+  display: flex; gap: .75rem; align-items: flex-start;
+  padding: .9rem 1rem; border-radius: .75rem;
+  background: rgba(255,255,255,.03); border: 1px solid rgba(126,182,255,.12);
+  transition: border-color .25s;
+}
+.check-card:hover { border-color: rgba(126,182,255,.3); }
+.check-card input { width: 16px; height: 16px; accent-color: #7EB6FF; margin-top: 1px; flex-shrink: 0; }
+.chk-title { font-size: .72rem; font-weight: 600; margin-bottom: .2rem; }
+.chk-sub   { font-size: .62rem; color: #b0b0b0; line-height: 1.5; }
+
+/* Progress bar */
+.prog-wrap { grid-column: 1/-1; display: none; align-items: center; gap: .75rem; }
+.prog-wrap.show { display: flex; }
+.prog-bar { flex: 1; height: 3px; background: rgba(126,182,255,.15); border-radius: 2px; overflow: hidden; }
+.prog-fill { height: 100%; background: linear-gradient(to right, #7EB6FF, #0010BD); border-radius: 2px; transition: width .2s; }
+.prog-txt { font-size: .7rem; color: #b0b0b0; white-space: nowrap; }
+
+.modal-actions { display: flex; justify-content: flex-end; gap: .75rem; margin-top: 1.5rem; }
+
+/* ══════════════════════════════════════════
+   TOAST (из caketools)
+══════════════════════════════════════════ */
+.toast-container {
+  position: fixed; top: 1.5rem; right: 1.5rem; z-index: 99998;
+  display: flex; flex-direction: column; gap: .75rem; pointer-events: none;
+}
+.toast {
+  min-width: 280px; padding: .9rem 1.25rem;
+  background: rgba(15,15,25,.95); border-radius: 1rem;
+  border: 1px solid rgba(126,182,255,.25); backdrop-filter: blur(12px);
+  display: flex; align-items: center; gap: .9rem;
+  animation: slideInRight .3s ease; pointer-events: auto;
+  box-shadow: 0 8px 32px rgba(0,0,0,.5);
+}
+.toast.toast-success { border-color: rgba(57,217,138,.4); }
+.toast.toast-error   { border-color: rgba(255,102,120,.4); }
+.toast.toast-warning { border-color: rgba(245,184,79,.4); }
+.toast-icon { font-size: 1.2rem; flex-shrink: 0; }
+.toast-body { flex: 1; }
+.toast-title { font-size: .78rem; font-weight: 600; }
+.toast-msg   { font-size: .7rem; color: #b0b0b0; margin-top: .15rem; line-height: 1.4; }
+.toast-close { background: none; border: none; color: #b0b0b0; font-size: 1.1rem; padding: 0 2px; flex-shrink: 0; }
+.toast-close:hover { color: #fff; }
+.toast.toast-exit { animation: slideOutRight .3s ease forwards; }
+@keyframes slideInRight  { from { transform: translateX(380px); opacity: 0; } }
+@keyframes slideOutRight { to   { transform: translateX(380px); opacity: 0; } }
+
+/* ── Shop modal ── */
+.shop-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.8);
+  backdrop-filter: blur(12px); display: none; align-items: center; justify-content: center;
+  z-index: 10600; padding: 1.5rem;
+}
+.shop-overlay.open { display: flex; }
+.shop-card {
+  width: min(900px,100%); height: min(640px,90vh);
+  background: rgba(8,8,18,.96);
+  border: 1px solid rgba(126,182,255,.25); border-radius: 1.25rem;
+  box-shadow: 0 20px 80px rgba(0,0,0,.7);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.shop-hdr {
+  display: flex; align-items: center; gap: 1rem;
+  padding: .9rem 1.25rem; border-bottom: 1px solid rgba(126,182,255,.12); flex-shrink: 0;
+}
+.shop-title { flex: 1; font-size: .85rem; font-weight: 700; color: #7EB6FF; }
+.shop-body { flex: 1; overflow-y: auto; padding: 1rem; }
+.shop-body::-webkit-scrollbar { width: 4px; }
+.shop-body::-webkit-scrollbar-thumb { background: rgba(126,182,255,.2); border-radius: 999px; }
+.shop-grid {
+  display: grid; gap: 8px;
+}
+.shop-slot {
+  border-radius: .5rem; display: flex; flex-direction: column;
+  font-size: .55rem; text-align: center; overflow: hidden;
+  transition: transform .15s, border-color .15s;
+  border: 1px solid transparent;
+}
+.shop-deco {
+  aspect-ratio: 1; align-items: center; justify-content: center;
+  background: rgba(255,255,255,.02); border-color: rgba(255,255,255,.04);
+}
+.shop-back {
+  aspect-ratio: 1; align-items: center; justify-content: center;
+  background: rgba(126,182,255,.08); border-color: rgba(126,182,255,.2); cursor: none !important;
+  color: #7EB6FF; font-size: 1rem; font-weight: 700;
+}
+.shop-back:hover { transform: scale(1.03); border-color: rgba(126,182,255,.5); }
+.shop-item {
+  background: rgba(255,255,255,.04); border-color: rgba(255,255,255,.1);
+  cursor: none !important; padding: 8px; align-items: flex-start; text-align: left; gap: 3px;
+}
+.shop-item:hover { transform: translateY(-2px); border-color: rgba(126,182,255,.4); background: rgba(126,182,255,.08); }
+.shop-item-top { display: flex; align-items: center; gap: 6px; width: 100%; }
+.shop-item-icon { font-size: 1.15rem; line-height: 1; flex-shrink: 0; }
+.shop-item-name { color: #e8e8e8; font-size: .62rem; font-weight: 600; line-height: 1.3; word-break: break-word; }
+.shop-item-lore { color: #888; font-size: .56rem; line-height: 1.5; width: 100%; padding-top: 2px; border-top: 1px solid rgba(255,255,255,.05); word-break: break-word; }
+.shop-item-lore span { display: block; }
+.shop-price { color: #7EB6FF; font-weight: 700; font-size: .62rem; margin-top: auto; padding-top: 4px; }
+.shop-item.has-price { border-color: rgba(126,182,255,.2); }
+.shop-item.is-section { border-color: rgba(57,217,138,.2); }
+.shop-item.is-section:hover { border-color: rgba(57,217,138,.5); background: rgba(57,217,138,.06); }
+.shop-item-arrow { margin-left: auto; color: #39d98a; font-size: .7rem; flex-shrink: 0; }
+
+.shop-scan-panel {
+  padding: .75rem 1.25rem; border-top: 1px solid rgba(126,182,255,.12);
+  display: flex; gap: .75rem; align-items: center; flex-shrink: 0; flex-wrap: wrap;
+}
+.shop-scan-result {
+  flex: 1; font-size: .65rem; color: #b0b0b0; overflow-y: auto; max-height: 120px;
+}
+.shop-scan-result table { width: 100%; border-collapse: collapse; }
+.shop-scan-result td { padding: 2px 6px; border-bottom: 1px solid rgba(255,255,255,.05); }
+.shop-scan-result td:last-child { color: #7EB6FF; text-align: right; }
+</style>
+</head>
+<body>
+
+<div class="custom-cursor"></div>
+<canvas id="particles-canvas"></canvas>
+
+<div class="container">
+  <!-- ── HEADER ── -->
+  <header class="header">
+    <nav class="nav">
+      <a class="logo" href="#">CakeWorld Bot Manager</a>
+
+      <div class="stats-row">
+        <div class="stat-pill"><div class="sdot g"></div>Онлайн&nbsp;<b id="s-online">0</b></div>
+        <div class="stat-pill"><div class="sdot" style="background:rgba(255,255,255,.3)"></div>Офлайн&nbsp;<b id="s-offline">0</b></div>
+        <div class="stat-pill"><div class="sdot r"></div>Бан&nbsp;<b id="s-banned">0</b></div>
+        <div class="stat-pill"><div class="sdot y"></div>RAM&nbsp;<b id="s-ram">—</b>&nbsp;MB</div>
+        <div class="stat-pill"><div class="sdot y"></div>CPU&nbsp;<b id="s-cpu">—</b></div>
+        <div class="stat-pill"><div class="sdot bl"></div>Heap&nbsp;<b id="s-heap">—</b>&nbsp;MB</div>
+      </div>
+
+      <div class="nav-btns">
+        <button class="btn btn-primary" onclick="openModal()">+ Создать ботов</button>
+        <a class="btn btn-secondary" href="/relics.html">🏆 Лидерборд риликов</a>
+        <button class="btn btn-secondary" onclick="doReconnectAll()">↺ Реконнект всех</button>
+        <button class="btn btn-secondary" onclick="doCaseAll()" style="border-color:rgba(57,217,138,.4);color:#39d98a;">📦 Кейс</button>
+        <button class="btn btn-secondary" onclick="doPasxaAll()" style="border-color:rgba(245,184,79,.4);color:#f5b84f;">🐣 ПАСХА</button>
+        <button class="btn btn-secondary" id="bc-btn" onclick="openBroadcast()" style="border-color:rgba(126,182,255,.4);color:#7EB6FF;">📡 Все боты</button>
+        <button class="btn btn-secondary" onclick="exportBots()" style="border-color:rgba(57,217,138,.4);color:#39d98a;">📤 Экспорт</button>
+        <button class="btn btn-secondary" onclick="openImportModal()" style="border-color:rgba(245,184,79,.4);color:#f5b84f;">📥 Импорт</button>
+      </div>
+    </nav>
+  </header>
+
+  <!-- ── DASHBOARD ── -->
+  <div class="dashboard">
+
+    <!-- Sidebar -->
+    <aside class="card sidebar">
+      <div class="sidebar-hdr">
+        <div class="card-title">Боты</div>
+        <div class="bot-counter" id="bot-count">0</div>
+      </div>
+      <div class="bot-list" id="bot-list">
+        <div class="no-bots" id="no-bots">Ботов пока нет.<br>Нажми «Создать ботов».</div>
+      </div>
+    </aside>
+
+    <!-- Right panel -->
+    <section class="card right-panel">
+
+      <!-- Empty -->
+      <div class="empty-state" id="empty-state">
+        <div class="empty-icon">🤖</div>
+        <div>Выбери бота из списка слева</div>
+        <div style="font-size:.65rem;color:rgba(255,255,255,.2)">или создай нового кнопкой выше</div>
+      </div>
+
+      <!-- Detail -->
+      <div class="detail-view" id="detail-view">
+        <div class="detail-hdr">
+          <div>
+            <div class="detail-name gradient-text" id="d-name">—</div>
+            <div class="detail-sub" id="d-sub">—</div>
+          </div>
+          <div class="action-row">
+            <button class="btn btn-secondary" onclick="doAfk()">🏊 AFK</button>
+            <button class="btn btn-secondary" onclick="openShop()" style="border-color:rgba(126,182,255,.4);color:#7EB6FF;">🛒 Магазин</button>
+            <button class="btn btn-secondary" onclick="doCase()" style="border-color:rgba(57,217,138,.4);color:#39d98a;">📦 Кейс</button>
+            <button class="btn btn-secondary" onclick="doReconnect()">↺ Реконнект</button>
+            <button class="btn btn-secondary" onclick="doClearLogs()">⌫ Очистить</button>
+            <button class="btn btn-danger"    onclick="doDelete()">✕ Удалить</button>
+          </div>
+        </div>
+
+        <!-- Info strip -->
+        <div class="bot-info-strip" id="d-strip"></div>
+
+        <!-- Console -->
+        <div class="console" id="console"></div>
+
+        <!-- Command bar -->
+        <div class="cmd-bar">
+          <input class="cmd-input" id="cmd-input"
+                 placeholder="/команда или сообщение (Enter — отправить, ↑↓ — история)"
+                 onkeydown="onCmdKey(event)">
+          <button class="btn btn-primary" onclick="doSend()">Отправить</button>
+        </div>
+      </div>
+
+    </section>
+  </div>
+</div>
+
+<!-- ── MODAL ── -->
+<div class="overlay" id="modal">
+  <div class="modal-card">
+    <div class="modal-title"><span class="gradient-text">Новые боты</span></div>
+    <div class="modal-sub">
+      Одинаковые базовые ники автоматически превращаются в Nick_2, Nick_3 и т.д.
+      Пустой пароль = ник. Пакетное создание через один запрос — быстрее и без лагов.
+      Если базовый ник уже на 16 символов, создаётся только один бот.
+    </div>
+
+    <div class="form-grid">
+      <div class="field full">
+        <label>Базовый никнейм</label>
+        <input class="field-input" id="m-user" maxlength="16" placeholder="TestBot" oninput="syncBatchNicknameRules()">
+      </div>
+      <div class="field">
+        <label>Пароль авторизации</label>
+        <input class="field-input" id="m-pass" maxlength="32" placeholder="пусто = ник">
+      </div>
+      <div class="field">
+        <label>Версия сервера</label>
+        <select class="field-select" id="m-ver">
+          <option value="1.20.1">1.20.1</option>
+          <option value="1.19.4">1.19.4</option>
+          <option value="1.18.2">1.18.2</option>
+          <option value="1.16.5">1.16.5</option>
+          <option value="1.12.2">1.12.2</option>
+          <option value="1.8.9">1.8.9</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Сервер</label>
+        <input class="field-input" id="m-host" value="mc.cakeworld.pw">
+      </div>
+      <div class="field">
+        <label>Порт</label>
+        <input class="field-input" id="m-port" value="25565" type="number">
+      </div>
+
+      <!-- Batch -->
+      <div class="batch-wrap">
+        <label>Количество</label>
+        <input type="range" id="m-count" min="1" max="50" value="1"
+               oninput="syncBatchCountLabel()">
+        <div class="batch-num" id="m-cval">1</div>
+      </div>
+
+      <div class="field">
+        <label>Размер пачки запуска</label>
+        <input class="field-input" id="m-wave-size" type="number" min="1" max="50" value="10">
+      </div>
+      <div class="field">
+        <label>Пауза между пачками (мс)</label>
+        <input class="field-input" id="m-wave-delay" type="number" min="0" max="60000" value="4000">
+      </div>
+
+      <!-- Checkboxes -->
+      <div class="checks-grid">
+        <label class="check-card">
+          <input type="checkbox" id="m-auth" checked>
+          <div><div class="chk-title">Авто-auth</div><div class="chk-sub">Автоматически отправляет /reg и /login по триггерам сервера</div></div>
+        </label>
+        <label class="check-card">
+          <input type="checkbox" id="m-nav" checked>
+          <div><div class="chk-title">Авто-навигация</div><div class="chk-sub">Берёт компас, открывает меню, кликает переход на сервер</div></div>
+        </label>
+        <label class="check-card">
+          <input type="checkbox" id="m-afk" checked>
+          <div><div class="chk-title">Авто-AFK</div><div class="chk-sub">Пишет /warp afk, проходит 2 блока и встаёт в афк-пул</div></div>
+        </label>
+        <label class="check-card">
+          <input type="checkbox" id="m-free" checked>
+          <div><div class="chk-title">Авто-награды /free</div><div class="chk-sub">Таймеры на 15/45/75/120/180... мин, автосбор в GUI</div></div>
+        </label>
+        <label class="check-card">
+          <input type="checkbox" id="m-reconnect" checked>
+          <div><div class="chk-title">Авто-реконнект</div><div class="chk-sub">Если кикнуло или сервер упал, бот сам попробует зайти заново</div></div>
+        </label>
+        <label class="check-card" id="kitfarm-check-card">
+          <input type="checkbox" id="m-kitfarm" onchange="toggleKitFarmFields()">
+          <div><div class="chk-title">🎁 KitFarm</div><div class="chk-sub">/warp mamka → /kit dragon/imperator/pluspro → выложить еду в сундук → выйти</div></div>
+        </label>
+      </div>
+
+      <!-- KitFarm поля — показываются только при включённом режиме -->
+      <div class="field full" id="kitfarm-fields" style="display:none; margin-top:.25rem; flex-direction:column; gap:.75rem;">
+        <div class="field full">
+          <label>Ник бота-овнера региона</label>
+          <input class="field-input" id="m-kitfarm-owner" placeholder="Ник бота который стартует первым и прописывает остальных">
+        </div>
+        <div class="field full">
+          <label>Название региона (для /rg addowner)</label>
+          <input class="field-input" id="m-kitfarm-region" placeholder="например: ikump или mamka_region">
+        </div>
+        <div style="font-size:.62rem;color:#b0b0b0;line-height:1.6;">
+          Команда: <code style="color:#7EB6FF">/rg addowner -w "world" &lt;регион&gt; &lt;ник_бота&gt;</code>
+        </div>
+      </div>
+
+      <!-- Выбор грифа -->
+      <div class="field full" style="margin-top:.5rem;">
+        <label>Мир грифа (авто-навигация)</label>
+        <select class="field-select" id="m-grief">
+          <option value="1">Гриф #1</option>
+          <option value="2">Гриф #2</option>
+          <option value="3">Гриф #3</option>
+          <option value="4">Гриф #4</option>
+        </select>
+      </div>
+
+      <!-- Progress -->
+      <div class="prog-wrap" id="prog-wrap">
+        <div class="prog-bar"><div class="prog-fill" id="prog-fill" style="width:0"></div></div>
+        <div class="prog-txt" id="prog-txt">Создаю...</div>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal()">Отмена</button>
+      <button class="btn btn-primary" id="create-btn" onclick="doCreate()">Создать</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toast-container"></div>
+
+<script>
+/* ════════════════════════════════════════════
+   PARTICLES (из caketools)
+════════════════════════════════════════════ */
+(function() {
+  const canvas = document.getElementById('particles-canvas');
+  const ctx    = canvas.getContext('2d');
+  let mX=0, mY=0;
+  function resize() { canvas.width=innerWidth; canvas.height=innerHeight; }
+  resize();
+  addEventListener('resize', resize);
+
+  class P {
+    constructor() {
+      this.x = Math.random()*canvas.width;
+      this.y = Math.random()*canvas.height;
+      this.s = Math.random()*1.5+.5;
+      this.vx= Math.random()*.4-.2;
+      this.vy= Math.random()*.4-.2;
+      this.o = Math.random()*.4+.15;
+    }
+    update() {
+      this.x+=this.vx; this.y+=this.vy;
+      if(this.x>canvas.width) this.x=0;
+      if(this.x<0) this.x=canvas.width;
+      if(this.y>canvas.height) this.y=0;
+      if(this.y<0) this.y=canvas.height;
+      const dx=mX-this.x, dy=mY-this.y, d=Math.sqrt(dx*dx+dy*dy);
+      if(d<90) { this.x-=dx*.015; this.y-=dy*.015; }
+    }
+    draw() {
+      ctx.fillStyle=`rgba(126,182,255,${this.o})`;
+      ctx.beginPath(); ctx.arc(this.x,this.y,this.s,0,Math.PI*2); ctx.fill();
+    }
+  }
+  const pts = Array.from({length:120},()=>new P());
+  addEventListener('mousemove', e=>{mX=e.clientX;mY=e.clientY;});
+
+  function frame() {
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    for(let i=0;i<pts.length;i++) {
+      pts[i].update(); pts[i].draw();
+      for(let j=i+1;j<pts.length;j++) {
+        const dx=pts[j].x-pts[i].x, dy=pts[j].y-pts[i].y;
+        const d=Math.sqrt(dx*dx+dy*dy);
+        if(d<100) {
+          ctx.strokeStyle=`rgba(126,182,255,${.15*(1-d/100)})`;
+          ctx.lineWidth=.5; ctx.beginPath();
+          ctx.moveTo(pts[i].x,pts[i].y); ctx.lineTo(pts[j].x,pts[j].y); ctx.stroke();
+        }
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+  frame();
+})();
+
+/* ════════════════════════════════════════════
+   CUSTOM CURSOR
+════════════════════════════════════════════ */
+(function() {
+  const cur = document.querySelector('.custom-cursor');
+  document.addEventListener('mousemove', e => {
+    cur.style.left = e.clientX+'px';
+    cur.style.top  = e.clientY+'px';
+  });
+  const obs = new MutationObserver(() => bindHover());
+  obs.observe(document.body, {childList:true, subtree:true});
+  function bindHover() {
+    document.querySelectorAll('a,button,.btn,input,select,label').forEach(el => {
+      if (el.dataset.cursorBound === '1') return;
+      el.dataset.cursorBound = '1';
+      el.addEventListener('mouseenter', () => cur.classList.add('hover'));
+      el.addEventListener('mouseleave', () => cur.classList.remove('hover'));
+    });
+  }
+  bindHover();
+})();
+
+/* ════════════════════════════════════════════
+   RIPPLE
+════════════════════════════════════════════ */
+document.addEventListener('click', e => {
+  const btn = e.target.closest('.btn');
+  if (!btn) return;
+  const r = document.createElement('span');
+  const rect = btn.getBoundingClientRect();
+  const size = Math.max(rect.width, rect.height);
+  r.style.cssText = `width:${size}px;height:${size}px;left:${e.clientX-rect.left-size/2}px;top:${e.clientY-rect.top-size/2}px`;
+  r.className = 'ripple';
+  btn.appendChild(r);
+  setTimeout(() => r.remove(), 600);
+});
+
+/* ════════════════════════════════════════════
+   TOAST
+════════════════════════════════════════════ */
+const Toast = {
+  show(msg, type='info', title='', dur=4000) {
+    const icons = {success:'✓',error:'✕',warning:'!',info:'i'};
+    const titles= {success:'Успешно',error:'Ошибка',warning:'Внимание',info:'Информация'};
+    const t = document.createElement('div');
+    t.className = `toast toast-${type}`;
+    t.innerHTML = `<div class="toast-icon">${icons[type]}</div><div class="toast-body"><div class="toast-title">${(title||titles[type]).replace(/</g,'&lt;')}</div><div class="toast-msg">${String(msg).replace(/</g,'&lt;')}</div></div><button class="toast-close">×</button>`;
+    t.querySelector('.toast-close').onclick = () => this.rm(t);
+    document.getElementById('toast-container').appendChild(t);
+    if (dur>0) setTimeout(()=>this.rm(t), dur);
+  },
+  rm(t) { t.classList.add('toast-exit'); setTimeout(()=>t.remove(),300); },
+  success(m,ti) { this.show(m,'success',ti,3000); },
+  error(m,ti)   { this.show(m,'error',ti,6000); },
+  info(m,ti)    { this.show(m,'info',ti,4000); },
+};
+
+/* ════════════════════════════════════════════
+   STATE
+════════════════════════════════════════════ */
+const socket = io();
+const CLIENT_LOG_LIMIT = 60;
+const S = {
+  bots: new Map(),
+  sel:  null,
+  live: new Map(), // id → {uptime, nextFree, stage, riliky}
+  hist: [], histIdx: -1,
+};
+
+const STAGE_LABEL = {
+  queued:'Очередь', connecting:'Подключение', auth:'Авторизация', lobby:'Лобби',
+  server:'Сервер', afk:'AFK-пул', farming:'Фарм наград',
+  banned:'ЗАБАНЕН', offline:'Офлайн', error:'Ошибка'
+};
+const LOG_TAG = {
+  info:'INFO', warn:'WARN', error:'ERR ', success:' OK ',
+  system:'SYS ', action:'CMD ', ban:'BAN!'
+};
+
+/* ════════════════════════════════════════════
+   INIT
+════════════════════════════════════════════ */
+document.addEventListener('DOMContentLoaded', () => {
+  fetch('/api/bots').then(r=>r.json()).then(list => {
+    list.forEach(b => S.bots.set(b.id, {...b, logs: (b.logs||[]).slice(-CLIENT_LOG_LIMIT)}));
+    renderAll();
+  });
+  document.getElementById('modal').addEventListener('click', e => {
+    if (e.target===e.currentTarget) closeModal();
+  });
+  document.addEventListener('keydown', e => { if(e.key==='Escape') closeModal(); });
+});
+
+/* ════════════════════════════════════════════
+   SOCKET EVENTS
+════════════════════════════════════════════ */
+socket.on('stats', s => {
+  el('s-online').textContent  = s.online;
+  el('s-offline').textContent = s.offline;
+  el('s-banned').textContent  = s.banned;
+  el('s-ram').textContent     = s.ram;
+  el('s-cpu').textContent     = typeof s.cpu==='number' ? s.cpu+'%' : '—';
+  if (s.heap != null) el('s-heap').textContent = s.heap;
+});
+
+socket.on('stats:live', s => {
+  el('s-ram').textContent = s.ram;
+  el('s-cpu').textContent = typeof s.cpu==='number' ? s.cpu+'%' : '—';
+  if (s.heap != null) el('s-heap').textContent = s.heap;
+  (s.bots||[]).forEach(({id,uptime,nextFree,stage,riliky}) => {
+    S.live.set(id, {uptime, nextFree, stage, riliky});
+  });
+  renderSidebar();
+  renderStrip();
+});
+
+socket.on('bot:created', b => {
+  S.bots.set(b.id, {...b, logs:(b.logs||[]).slice(-CLIENT_LOG_LIMIT), riliky:Number.isFinite(b.riliky) ? b.riliky : null});
+  renderAll();
+});
+socket.on('bot:removed', ({id}) => {
+  S.bots.delete(id); S.live.delete(id);
+  if (S.sel===id) selectBot(null);
+  renderAll();
+});
+socket.on('bot:stage', ({id, stage, status}) => {
+  const b = S.bots.get(id); if (!b) return;
+  b.stage = stage; b.status = status;
+  renderSidebar();
+  if (S.sel===id) { renderHeader(); renderStrip(); }
+});
+socket.on('bot:log', ({id, type, text, ts}) => {
+  const b = S.bots.get(id); if (!b) return;
+  b.logs.push({type,text,ts});
+  if (b.logs.length>CLIENT_LOG_LIMIT) b.logs.splice(0, b.logs.length-CLIENT_LOG_LIMIT);
+  if (S.sel===id) appendLine({type,text,ts});
+  if (bcOpen) bcAppendLine(b.config?.username || id, type, text, ts);
+});
+socket.on('bot:riliky', ({id, riliky}) => {
+  const b = S.bots.get(id); if (!b) return;
+  b.riliky = Number.isFinite(riliky) ? riliky : null;
+  const live = S.live.get(id) || {};
+  S.live.set(id, {...live, riliky: b.riliky});
+  renderSidebar();
+  if (S.sel===id) renderStrip();
+});
+
+/* ════════════════════════════════════════════
+   RENDER
+════════════════════════════════════════════ */
+function renderAll() { renderSidebar(); renderMain(); }
+
+function renderSidebar() {
+  const list = el('bot-list');
+  const bots = [...S.bots.values()].sort((a,b)=>a.id-b.id);
+  el('bot-count').textContent = bots.length;
+  el('no-bots').style.display = bots.length ? 'none' : '';
+
+  // Обновляем или создаём элементы
+  const existing = new Set([...list.querySelectorAll('[data-id]')].map(e=>+e.dataset.id));
+  bots.forEach(b => {
+    const live = S.live.get(b.id)||{};
+    const stage = live.stage || b.stage || b.status;
+    const riliky = getBotRiliky(b, live);
+    let row = list.querySelector(`[data-id="${b.id}"]`);
+    if (!row) {
+      row = document.createElement('div');
+      row.dataset.id = b.id;
+      row.addEventListener('click', () => selectBot(b.id));
+      list.appendChild(row);
+    }
+    row.className = 'bot-item' + (S.sel===b.id?' active':'') + (b.status==='banned'?' banned':'');
+    row.innerHTML = `
+      <div class="bi-top">
+        <div class="status-badge">
+          <div class="status-dot ${esc(b.status)}"></div>
+          <span class="stage-chip ${esc(stage)}">${esc(STAGE_LABEL[stage]||stage)}</span>
+        </div>
+        <button class="bi-del" onclick="quickDel(${b.id},event)">×</button>
+      </div>
+      <div class="bi-name">${esc(b.config.username)}</div>
+      <div class="bi-meta">
+        <span>${esc(b.config.host)}</span>
+        <span>uptime: ${fmtUp(live.uptime||0)}${
+          live.nextFree!=null && live.nextFree>0
+          ? ' · <span class="free-countdown">⏱ /free через '+fmtDur(live.nextFree)+'</span>'
+          : ''
+        }${Number.isFinite(riliky)
+          ? ' · <span class="free-countdown">🔶 Рилики: '+fmtNum(riliky)+'</span>'
+          : ''
+        }</span>
+      </div>`;
+    existing.delete(b.id);
+  });
+  existing.forEach(id => list.querySelector(`[data-id="${id}"]`)?.remove());
+}
+
+function renderMain() {
+  const b = getBot();
+  el('empty-state').style.display = b ? 'none' : 'flex';
+  el('detail-view').style.display = b ? 'flex' : 'none';
+  if (b) { renderHeader(); renderStrip(); renderConsole(); }
+}
+
+function renderHeader() {
+  const b = getBot(); if (!b) return;
+  const live  = S.live.get(b.id)||{};
+  const stage = live.stage || b.stage || b.status;
+  el('d-name').textContent = b.config.username;
+  el('d-sub').textContent  = `${b.config.host}:${b.config.port||25565} · v${b.config.version||'1.20.1'} · ${STAGE_LABEL[stage]||stage}`;
+}
+
+function renderStrip() {
+  const b = getBot(); if (!b) return;
+  const live = S.live.get(b.id)||{};
+  const stage = live.stage || b.stage;
+  const riliky = getBotRiliky(b, live);
+  const flags = [
+    ['ID', b.id],
+    ['uptime', fmtUp(live.uptime||0)],
+    ['auth',  b.config.autoAuth===false?'off':'on'],
+    ['nav',   b.config.autoNav===false?'off':'on'],
+    ['afk',   b.config.autoAfk===false?'off':'on'],
+    ['free',  b.config.autoFree===false?'off':'on'],
+    ['recon', b.config.autoReconnect===false?'off':'on'],
+  ];
+  let html = flags.map(([k,v])=>`<div class="info-tag${v==='on'?' hi':''}">${esc(k)}: ${esc(String(v))}</div>`).join('');
+  if (Number.isFinite(riliky)) {
+    html += `<div class="info-tag" style="color:#f5b84f;border-color:rgba(245,184,79,.4);font-weight:600">🔶 Рилики: ${fmtNum(riliky)}</div>`;
+  }
+  if (live.nextFree!=null && live.nextFree>=0) {
+    html += `<div class="info-tag" style="color:#f5b84f;border-color:rgba(245,184,79,.3)">⏱ /free: ${fmtDur(live.nextFree)}</div>`;
+  }
+  if (stage) html += `<div class="stage-chip ${esc(stage)}" style="font-size:.65rem">${esc(STAGE_LABEL[stage]||stage)}</div>`;
+  el('d-strip').innerHTML = html;
+}
+
+function renderConsole() {
+  const b = getBot(); if (!b) return;
+  const con = el('console');
+  con.innerHTML = '';
+  (b.logs||[]).forEach(e => appendLine(e, false));
+  con.scrollTop = con.scrollHeight;
+}
+
+function appendLine({type,text,ts}, scroll=true) {
+  const con = el('console'); if (!con) return;
+  const atBot = con.scrollHeight - con.clientHeight - con.scrollTop < 50;
+  const d = document.createElement('div');
+  d.className = `log-line log-${type||'system'}`;
+  const t = new Date(ts||Date.now()).toLocaleTimeString('ru',{hour12:false});
+  d.innerHTML =
+    `<span class="log-ts">${t}</span>` +
+    `<span class="log-tag">${LOG_TAG[type]||type}</span>` +
+    `<span class="log-msg">${esc(text)}</span>`;
+  con.appendChild(d);
+  if (scroll && atBot) con.scrollTop = con.scrollHeight;
+}
+
+/* ════════════════════════════════════════════
+   ACTIONS
+════════════════════════════════════════════ */
+function selectBot(id) {
+  S.sel=id; S.hist=[]; S.histIdx=-1;
+  renderAll();
+  if (id) setTimeout(()=>el('cmd-input')?.focus(), 60);
+}
+function getBot() { return S.sel ? S.bots.get(S.sel) : null; }
+
+function onCmdKey(e) {
+  if (e.key==='Enter') { doSend(); return; }
+  if (e.key==='ArrowUp') {
+    e.preventDefault();
+    if (S.histIdx < S.hist.length-1) { S.histIdx++; el('cmd-input').value = S.hist[S.hist.length-1-S.histIdx]||''; }
+  }
+  if (e.key==='ArrowDown') {
+    e.preventDefault();
+    if (S.histIdx>0) { S.histIdx--; el('cmd-input').value = S.hist[S.hist.length-1-S.histIdx]||''; }
+    else { S.histIdx=-1; el('cmd-input').value=''; }
+  }
+}
+
+async function doSend() {
+  const b = getBot(); if (!b) return;
+  const inp = el('cmd-input');
+  const msg = inp.value.trim(); if (!msg) return;
+  inp.value=''; S.hist.push(msg); S.histIdx=-1;
+  try {
+    await api(`/api/bots/${b.id}/chat`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:msg})});
+  } catch(e) { Toast.error(e.message); }
+}
+
+async function doReconnect() {
+  const b = getBot(); if (!b) return;
+  try { await api(`/api/bots/${b.id}/reconnect`,{method:'POST'}); Toast.success('Реконнект запущен'); }
+  catch(e) { Toast.error(e.message); }
+}
+
+async function doAfk() {
+  const b = getBot(); if (!b) return;
+  try { await api(`/api/bots/${b.id}/afk`,{method:'POST'}); Toast.info('AFK команда отправлена'); }
+  catch(e) { Toast.error(e.message); }
+}
+
+async function doCase() {
+  const b = getBot(); if (!b) return;
+  try { await api(`/api/bots/${b.id}/case`,{method:'POST'}); Toast.info('Открываю кейс...'); }
+  catch(e) { Toast.error(e.message); }
+}
+
+async function doPasxaAll() {
+  const count = S.bots.size;
+  if (!count) { Toast.info('Нет активных ботов'); return; }
+  try {
+    await api('/api/bots/pasxa/all', {method:'POST'});
+    Toast.success(`/pasxa отправлен ${count} ботам`, '🐣 ПАСХА');
+  } catch(e) { Toast.error(e.message); }
+}
+
+async function doReconnectAll() {
+  const count = S.bots.size;
+  if (!count) { Toast.info('Нет активных ботов'); return; }
+  try {
+    await api('/api/bots/reconnect/all', {method:'POST'});
+    Toast.success(`Реконнект запущен для ${count} ботов`, '↺ Реконнект');
+  } catch(e) { Toast.error(e.message); }
+}
+
+async function doCaseAll() {
+  const count = S.bots.size;
+  if (!count) { Toast.info('Нет активных ботов'); return; }
+  try {
+    await api('/api/bots/case/all', {method:'POST'});
+    Toast.success(`Кейс запущен для ${count} ботов`, '📦 Кейс');
+  } catch(e) { Toast.error(e.message); }
+}
+
+function doClearLogs() {
+  const b = getBot(); if (!b) return;
+  b.logs=[]; el('console').innerHTML='';
+}
+
+async function doDelete() {
+  const b = getBot(); if (!b) return;
+  if (!confirm(`Удалить бота ${b.config.username}?`)) return;
+  await quickDel(b.id);
+}
+
+async function quickDel(id, e) {
+  if (e) e.stopPropagation();
+  try { await api(`/api/bots/${id}`,{method:'DELETE'}); }
+  catch(err) { Toast.error(err.message); }
+}
+
+/* ════════════════════════════════════════════
+   CREATE BOTS (batch)
+════════════════════════════════════════════ */
+function openModal()  { el('modal').classList.add('open'); setTimeout(()=>el('m-user')?.focus(), 80); }
+function closeModal() { el('modal').classList.remove('open'); }
+
+function syncBatchCountLabel() {
+  el('m-cval').textContent = el('m-count').value;
+}
+
+function syncBatchNicknameRules() {
+  const base = (el('m-user')?.value || '').trim().replace(/\s+/g, '');
+  const countEl = el('m-count');
+  const waveSizeEl = el('m-wave-size');
+  if (!countEl || !waveSizeEl) return;
+  const singleOnly = base.length >= 16;
+  countEl.max = singleOnly ? '1' : '50';
+  if (singleOnly && parseInt(countEl.value, 10) > 1) {
+    countEl.value = '1';
+    Toast.info('Для ника в 16 символов создаётся только один бот', 'Лимит ника');
+  }
+  if (singleOnly && parseInt(waveSizeEl.value, 10) > 1) {
+    waveSizeEl.value = '1';
+  }
+  syncBatchCountLabel();
+}
+
+async function doCreate() {
+  const base = el('m-user').value.trim();
+  if (!base) { Toast.error('Введи базовый ник'); return; }
+  syncBatchNicknameRules();
+  const count = parseInt(el('m-count').value)||1;
+  const waveSize = Math.max(1, parseInt(el('m-wave-size').value)||Math.min(10,count));
+  const waveDelayMs = Math.max(0, parseInt(el('m-wave-delay').value)||4000);
+
+  const btn  = el('create-btn');
+  const prog = el('prog-wrap');
+  const fill = el('prog-fill');
+  const txt  = el('prog-txt');
+
+  btn.disabled = true;
+  prog.classList.add('show');
+  fill.style.width = '10%';
+  txt.textContent  = count > waveSize
+    ? `Создаю ${count} ботов волнами по ${waveSize}...`
+    : `Создаю ${count} ${pluralBot(count)}...`;
+
+  const payload = {
+    base,
+    count,
+    waveSize,
+    waveDelayMs,
+    authPassword: el('m-pass').value.trim(),
+    host:    el('m-host').value.trim()||'mc.cakeworld.pw',
+    port:    el('m-port').value||'25565',
+    version: el('m-ver').value,
+    autoAuth:el('m-auth').checked,
+    autoNav: el('m-nav').checked,
+    autoAfk: el('m-afk').checked,
+    autoFree:el('m-free').checked,
+    autoReconnect:el('m-reconnect').checked,
+    griefWorld: parseInt(el('m-grief').value)||1,
+    kitFarm: el('m-kitfarm').checked,
+    kitFarmRegionOwner: el('m-kitfarm-owner').value.trim() || null,
+    kitFarmRegion: el('m-kitfarm-region').value.trim() || null,
+  };
+
+  try {
+    const res = await api('/api/bots/batch', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
+    });
+    fill.style.width='100%';
+    txt.textContent = res.waves > 1
+      ? `Готово! ${res.created} ботов, ${res.waves} волн по ${res.waveSize}`
+      : `Готово! Создано ${res.created} ${pluralBot(res.created)}`;
+    if (res.singleOnlyDueToMaxUsername) {
+      Toast.info('Базовый ник занял все 16 символов, поэтому создан только один бот', 'Лимит ника');
+    }
+    Toast.success(
+      res.waves > 1
+        ? `Создано ${res.created} ботов • ${res.waves} волн по ${res.waveSize}`
+        : `Создано ${res.created} ${pluralBot(res.created)}`
+    );
+    setTimeout(()=>{ closeModal(); resetModal(); }, 700);
+  } catch(e) {
+    Toast.error(e.message);
+    resetModal();
+    btn.disabled = false;
+  }
+}
+
+function resetModal() {
+  el('m-user').value=''; el('m-pass').value='';
+  el('m-count').value=1; el('m-cval').textContent='1';
+  el('m-count').max='50';
+  el('m-wave-size').value=10;
+  el('m-wave-delay').value=4000;
+  el('m-kitfarm').checked=false;
+  el('m-kitfarm-owner').value='';
+  el('m-kitfarm-region').value='';
+  el('kitfarm-fields').style.display='none';
+  el('prog-wrap').classList.remove('show');
+  el('prog-fill').style.width='0';
+  el('create-btn').disabled=false;
+}
+
+function toggleKitFarmFields() {
+  el('kitfarm-fields').style.display = el('m-kitfarm').checked ? 'flex' : 'none';
+}
+
+function pluralBot(n) {
+  if (n%10===1&&n%100!==11) return 'бот';
+  if ([2,3,4].includes(n%10)&&![12,13,14].includes(n%100)) return 'бота';
+  return 'ботов';
+}
+
+/* ════════════════════════════════════════════
+   UTILS
+════════════════════════════════════════════ */
+function el(id) { return document.getElementById(id); }
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function fmtUp(s) {
+  s=s||0;
+  if(s<60)   return s+'s';
+  if(s<3600) return Math.floor(s/60)+'m '+Math.floor(s%60)+'s';
+  return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';
+}
+
+function fmtDur(ms) {
+  if (!ms||ms<=0) return 'скоро';
+  const s=Math.floor(ms/1000);
+  if(s<60) return s+'с';
+  const m=Math.floor(s/60), sec=s%60;
+  if(m<60) return m+'м '+(sec?sec+'с':'');
+  return Math.floor(m/60)+'ч '+Math.floor(m%60)+'м';
+}
+
+function fmtNum(n) {
+  return Number.isFinite(n) ? new Intl.NumberFormat('ru-RU').format(n) : '—';
+}
+
+function getBotRiliky(bot, live = null) {
+  if (Number.isFinite(live?.riliky)) return live.riliky;
+  if (Number.isFinite(bot?.riliky)) return bot.riliky;
+  if (Number.isFinite(bot?.relics?.value)) return bot.relics.value;
+  return null;
+}
+
+async function api(url, opts) {
+  const r = await fetch(url, opts);
+  let body={};
+  try{body=await r.json();}catch{}
+  if(!r.ok) throw new Error(body.error||r.statusText);
+  return body;
+}
+
+/* ════════════ Broadcast console JS ════════════ */
+let bcOpen = false;
+let bcMsgCount = 0;
+
+function openBroadcast() {
+  bcOpen = true;
+  document.getElementById('bc-overlay').classList.add('open');
+  document.getElementById('bc-input').focus();
+  updateBcBadge();
+}
+function closeBroadcast() {
+  bcOpen = false;
+  document.getElementById('bc-overlay').classList.remove('open');
+}
+function updateBcBadge() {
+  document.getElementById('bc-badge').textContent = bcMsgCount > 99 ? '99+' : bcMsgCount;
+}
+function bcAppendLine(who, type, text, ts) {
+  const log = document.getElementById('bc-log');
+  const div = document.createElement('div');
+  div.className = 'bc-log-line';
+  const t = ts ? new Date(ts).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '';
+  const cls = type === 'error' ? '#ff6678' : type === 'warn' ? '#f5b84f' : type === 'success' ? '#39d98a' : '#ddd';
+  div.innerHTML = `<span class="bc-ts">[${t}]</span> <span class="bc-who">${escHtml(who)}</span> <span class="bc-msg" style="color:${cls}">${escHtml(text)}</span>`;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+  bcMsgCount++;
+  updateBcBadge();
+}
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+async function bcSend() {
+  const inp = document.getElementById('bc-input');
+  const msg = inp.value.trim();
+  if (!msg) return;
+  inp.value = '';
+  try {
+    const r = await api('/api/bots/broadcast', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({message: msg})});
+    bcAppendLine('📡 Отправлено', 'success', `"${msg}" → ${r.sent} ботам`, Date.now());
+  } catch(e) {
+    bcAppendLine('📡 Ошибка', 'error', e.message, Date.now());
+  }
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && bcOpen) closeBroadcast();
+});
+
+// ═══════════════ SHOP ═══════════════
+let shopBotId = null;
+let shopData  = null;
+
+async function openShop() {
+  const b = getBot(); if (!b) return;
+  shopBotId = b.id;
+  el('shop-title').textContent = 'Открываю магазин...';
+  el('shop-grid').innerHTML = '<div style="color:#7EB6FF;padding:1rem;text-align:center">Ожидаю открытие окна...</div>';
+  el('shop-overlay').classList.add('open');
+  try {
+    const r = await api(`/api/bots/${b.id}/shop/open`, { method: 'POST' });
+    shopData = r.shop;
+    renderShopGrid();
+  } catch(e) {
+    el('shop-grid').innerHTML = `<div style="color:#ff6678;padding:1rem;text-align:center">${escHtml(e.message)}</div>`;
+  }
+}
+
+async function shopClick(slot) {
+  if (!shopBotId) return;
+  try {
+    const r = await api(`/api/bots/${shopBotId}/shop/click`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slot })
+    });
+    if (r.bought) Toast.success('Куплено!', '🛒');
+    shopData = r.shop;
+    renderShopGrid();
+  } catch(e) { Toast.error('Клик: ' + e.message); }
+}
+
+async function closeShop() {
+  if (shopBotId) api(`/api/bots/${shopBotId}/shop/close`, { method: 'POST' }).catch(() => {});
+  shopBotId = null; shopData = null;
+  el('shop-overlay').classList.remove('open');
+}
+
+async function doShopScan() {
+  if (!shopBotId) return;
+  el('shop-scan-panel').style.display = '';
+  el('shop-scan-result').innerHTML = '<div style="color:#7EB6FF">Сканирование...</div>';
+  try {
+    await api(`/api/bots/${shopBotId}/shop/scan`, { method: 'POST' });
+  } catch(e) { Toast.error(e.message); }
+}
+
+socket.on('shop:scan', ({ id, result }) => {
+  if (id !== shopBotId) return;
+  const panel = el('shop-scan-panel');
+  panel.style.display = '';
+  if (!result.items.length) { el('shop-scan-result').innerHTML = '<div style="color:#b0b0b0">Товаров не найдено</div>'; return; }
+  const rows = result.items
+    .sort((a,b) => (a.price||999999)-(b.price||999999))
+    .map(it => `<tr><td>${escHtml(it.section||'')}</td><td>${escHtml(it.name)}</td><td>${it.price != null ? it.price + ' 💎' : '—'}</td></tr>`)
+    .join('');
+  el('shop-scan-result').innerHTML = `<table><thead><tr><td>Раздел</td><td>Товар</td><td>Цена</td></tr></thead><tbody>${rows}</tbody></table>`;
+});
+
+function renderShopGrid() {
+  if (!shopData) return;
+  el('shop-title').textContent = shopData.title || 'Магазин';
+  const cols = shopData.size <= 27 ? 9 : shopData.size <= 36 ? 9 : 9;
+  const grid = el('shop-grid');
+  grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+  const slotMap = new Map(shopData.slots.map(s => [s.index, s]));
+  let html = '';
+  for (let i = 0; i < shopData.size; i++) {
+    const s = slotMap.get(i);
+    if (!s || s.isDecorative) {
+      html += `<div class="shop-slot shop-deco"></div>`;
+    } else if (s.isBack) {
+      html += `<div class="shop-slot shop-back" onclick="shopBack()">←</div>`;
+    } else {
+      const isSection = s.price == null;
+      const cls = isSection ? 'shop-item is-section' : 'shop-item has-price';
+      const priceHtml = s.price != null ? `<div class="shop-price">💎 ${s.price}</div>` : '';
+      const arrowHtml = isSection ? `<span class="shop-item-arrow">▶</span>` : '';
+      const loreHtml = s.lore.length
+        ? `<div class="shop-item-lore">${s.lore.map(l => `<span>${escHtml(l)}</span>`).join('')}</div>`
+        : '';
+      html += `<div class="${cls}" onclick="shopClick(${i})">
+        <div class="shop-item-top">
+          <div class="shop-item-icon">${shopItemEmoji(s.itemType, s.name)}</div>
+          <div class="shop-item-name">${escHtml(s.name)}</div>
+          ${arrowHtml}
+        </div>
+        ${loreHtml}
+        ${priceHtml}
+      </div>`;
+    }
+  }
+  grid.innerHTML = html;
+}
+
+function shopBack() {
+  if (!shopData) return;
+  const backSlot = shopData.slots.find(s => s.isBack);
+  if (backSlot) shopClick(backSlot.index);
+}
+
+function shopItemEmoji(t, name = '') {
+  const n = name.toLowerCase();
+  // По русскому/английскому названию (кастомные головы)
+  if (/меч|sword/i.test(n))                          return '⚔️';
+  if (/топор|axe/i.test(n))                           return '🪓';
+  if (/лук(?!овица)|bow/i.test(n))                    return '🏹';
+  if (/арбалет|crossbow/i.test(n))                    return '🏹';
+  if (/зелье|potion/i.test(n))                        return '🧪';
+  if (/яблок|apple/i.test(n))                         return '🍎';
+  if (/морков|carrot/i.test(n))                       return '🥕';
+  if (/хлеб|bread/i.test(n))                         return '🍞';
+  if (/мясо|говяд|свинина|курица|beef|pork|chicken/i.test(n)) return '🍖';
+  if (/рыб|fish/i.test(n))                            return '🐟';
+  if (/книг|book/i.test(n))                           return '📖';
+  if (/тотем|totem/i.test(n))                         return '🪬';
+  if (/кирк|pickaxe/i.test(n))                        return '⛏️';
+  if (/лопат|shovel/i.test(n))                        return '🪤';
+  if (/броня|шлем|нагрудник|поножи|ботинки|helmet|chestplate|leggings|boots|armor/i.test(n)) return '🛡️';
+  if (/яйцо|яйц|egg/i.test(n))                       return '🥚';
+  if (/блок|block|камен|cobble|stone|dirt|песок|sand/i.test(n)) return '🧱';
+  if (/дерево|дуб|берёза|wood|oak|birch|log/i.test(n)) return '🪵';
+  if (/алмаз|diamond/i.test(n))                       return '💎';
+  if (/изумруд|emerald/i.test(n))                     return '💚';
+  if (/золото|gold/i.test(n))                         return '🥇';
+  if (/железо|iron/i.test(n))                         return '🔩';
+  if (/уголь|coal/i.test(n))                          return '⬛';
+  if (/жемчуг|pearl|эндер.*жемч/i.test(n))           return '🟣';
+  if (/эндер|ender/i.test(n))                         return '🟣';
+  if (/дракон|dragon/i.test(n))                       return '🐲';
+  if (/зомби|zombie/i.test(n))                        return '🧟';
+  if (/скелет|skeleton/i.test(n))                     return '💀';
+  if (/крипер|creeper/i.test(n))                      return '💚';
+  if (/паук|spider/i.test(n))                         return '🕷️';
+  if (/кейс|case|подарок|gift/i.test(n))             return '🎁';
+  if (/сундук|chest|barrel|бочк/i.test(n))           return '📦';
+  if (/опыт|xp|experience/i.test(n))                 return '✨';
+  if (/семен|семя|seed/i.test(n))                     return '🌱';
+  if (/гриб|mushroom/i.test(n))                       return '🍄';
+  if (/цветок|flower|роза|rose/i.test(n))            return '🌸';
+  if (/стрел|arrow/i.test(n))                         return '➡️';
+  if (/маяк|beacon/i.test(n))                         return '🔦';
+  if (/кристалл|crystal/i.test(n))                   return '🔮';
+  if (/слиток|ingot/i.test(n))                        return '🔶';
+  if (/механизм|machine|станок|furnace|печ/i.test(n)) return '⚙️';
+  // По типу предмета
+  if (!t) return '📦';
+  if (t.includes('diamond'))    return '💎';
+  if (t.includes('sword'))      return '⚔️';
+  if (t.includes('bow'))        return '🏹';
+  if (t.includes('potion'))     return '🧪';
+  if (t.includes('apple'))      return '🍎';
+  if (t.includes('book'))       return '📖';
+  if (t.includes('totem'))      return '🪬';
+  if (t.includes('egg'))        return '🥚';
+  if (t.includes('helmet') || t.includes('chestplate') || t.includes('leggings') || t.includes('boots')) return '🛡️';
+  if (t.includes('pickaxe'))    return '⛏️';
+  if (t.includes('experience')) return '✨';
+  return '📦';
+}
+
+// ═══════════════ ЭКСПОРТ / ИМПОРТ ═══════════════
+function exportBots() {
+  if (!S.bots.size) { Toast.info('Нет ботов для экспорта'); return; }
+  const lines = ['# CakeWorld Bot Manager'];
+  for (const b of S.bots.values())
+    lines.push(`${b.config.username}:${b.config.authPassword || b.config.username}`);
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'bots.txt';
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+  Toast.success(`Экспортировано ${S.bots.size} ботов`, '📤');
+}
+
+function openImportModal() {
+  const first = [...S.bots.values()][0];
+  if (first) {
+    el('imp-host').value    = first.config.host    || '';
+    el('imp-port').value    = first.config.port    || '25565';
+    el('imp-version').value = first.config.version || '1.20.1';
+  }
+  el('import-overlay').classList.add('open');
+}
+
+async function doImport() {
+  const host = el('imp-host').value.trim();
+  if (!host) { Toast.error('Укажите сервер'); return; }
+  const fileEl = el('imp-file');
+  if (!fileEl.files.length) { Toast.error('Выберите файл'); return; }
+  const text = await fileEl.files[0].text();
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+  if (!lines.length) { Toast.error('Файл пустой'); return; }
+  const defaultPass = el('imp-pass').value.trim();
+  const botList = lines.map(l => {
+    const sep = l.indexOf(':');
+    const username = sep >= 0 ? l.slice(0, sep).trim() : l.trim();
+    const password = sep >= 0 ? l.slice(sep + 1).trim() : (defaultPass || username);
+    return { username, password };
+  }).filter(e => e.username);
+  if (!botList.length) { Toast.error('Нет валидных строк'); return; }
+  const btn = el('imp-btn');
+  btn.textContent = 'Загружаю...'; btn.disabled = true;
+  try {
+    const r = await api('/api/bots/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        host, port: el('imp-port').value || '25565',
+        version: el('imp-version').value || '1.20.1',
+        bots: botList
+      })
+    });
+    Toast.success(`Загружено ${r.created} ботов`, '📥');
+    el('import-overlay').classList.remove('open');
+    fileEl.value = '';
+  } catch(e) { Toast.error(e.message); }
+  finally { btn.textContent = 'Импортировать'; btn.disabled = false; }
+}
+
+</script>
+
+<!-- Broadcast console overlay -->
+<div class="bc-overlay" id="bc-overlay" onclick="if(event.target===this)closeBroadcast()">
+  <div class="bc-card">
+    <div class="bc-hdr">
+      <div class="bc-title">📡 Консоль всех ботов <span class="bc-badge" id="bc-badge">0</span></div>
+      <button class="btn btn-secondary" onclick="closeBroadcast()" style="padding:.3rem .8rem;font-size:.7rem;">✕ Закрыть</button>
+    </div>
+    <div class="bc-log" id="bc-log"></div>
+    <div class="bc-footer">
+      <input class="bc-input" id="bc-input" type="text" placeholder="Команда или сообщение для всех ботов..."
+        onkeydown="if(event.key==='Enter')bcSend()">
+      <button class="btn btn-primary" onclick="bcSend()" style="white-space:nowrap;">Отправить всем</button>
+    </div>
+  </div>
+</div>
+
+<!-- Shop overlay -->
+<div class="shop-overlay" id="shop-overlay" onclick="if(event.target===this)closeShop()">
+  <div class="shop-card">
+    <div class="shop-hdr">
+      <div class="shop-title" id="shop-title">Магазин</div>
+      <button class="btn btn-secondary" id="shop-scan-btn" onclick="doShopScan()" style="font-size:.7rem;padding:.3rem .8rem;">🔍 Сканировать всё</button>
+      <button class="btn btn-secondary" onclick="closeShop()" style="font-size:.7rem;padding:.3rem .8rem;">✕</button>
+    </div>
+    <div class="shop-body">
+      <div class="shop-grid" id="shop-grid"></div>
+    </div>
+    <div class="shop-scan-panel" id="shop-scan-panel" style="display:none">
+      <div class="shop-scan-result" id="shop-scan-result"></div>
+    </div>
+  </div>
+</div>
+<!-- Import modal -->
+<div class="overlay" id="import-overlay" onclick="if(event.target===this)el('import-overlay').classList.remove('open')">
+  <div class="modal-card" style="width:min(480px,100%)">
+    <div class="modal-title">📥 Импорт ботов</div>
+    <div class="modal-sub">Формат файла — по одному боту в строке:<br><code style="color:#7EB6FF">username:password</code> &nbsp;или&nbsp; <code style="color:#7EB6FF">username</code></div>
+    <div class="form-grid">
+      <div class="field">
+        <label>Сервер</label>
+        <input class="field-input" id="imp-host" placeholder="mc.cakeworld.pw">
+      </div>
+      <div class="field">
+        <label>Порт</label>
+        <input class="field-input" id="imp-port" value="25565">
+      </div>
+      <div class="field">
+        <label>Версия</label>
+        <input class="field-input" id="imp-version" value="1.20.1">
+      </div>
+      <div class="field">
+        <label>Пароль по умолчанию (если не в файле)</label>
+        <input class="field-input" id="imp-pass" placeholder="оставьте пустым = пароль = ник">
+      </div>
+      <div class="field full">
+        <label>Файл (.txt)</label>
+        <input type="file" id="imp-file" accept=".txt,.csv" class="field-input" style="padding:.6rem">
+      </div>
+    </div>
+    <div style="display:flex;gap:.75rem;margin-top:1.5rem">
+      <button class="btn btn-primary" id="imp-btn" onclick="doImport()">Импортировать</button>
+      <button class="btn btn-secondary" onclick="el('import-overlay').classList.remove('open')">Отмена</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>
