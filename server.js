@@ -104,20 +104,29 @@ const sleep   = ms => new Promise(r => setTimeout(r, ms));
 const navWindowHandled = new Set();
 
 // ── Безопасный чат (не флудим — ждём между командами) ──
-const CHAT_MIN_GAP_MS = 600; // минимум между командами
+const CHAT_MIN_GAP_MS = 600;
 const chatQueues = new Map(); // id → Promise
+
 function chatSafe(id, cmd) {
     const b = bots.get(id);
     if (!b?.mc) return Promise.resolve();
     const prev = chatQueues.get(id) || Promise.resolve();
+    const token = b.mc; // привязываем к текущей сессии
     const next = prev.then(async () => {
         const cur = bots.get(id);
-        if (!cur?.mc || cur.status !== 'online') return;
-        cur.mc.chat(cmd);
-        await sleep(S.chatGapMs);
+        // Не отправляем если бот сменился или не онлайн
+        if (!cur?.mc || cur.mc !== token || cur.status !== 'online') return;
+        try { cur.mc.chat(cmd); } catch(e) {
+            addLog(id, LOG.WARN, `chatSafe ошибка: ${e.message}`);
+        }
+        await sleep(Math.max(S.chatGapMs, CHAT_MIN_GAP_MS));
     });
     chatQueues.set(id, next.catch(() => {}));
     return next;
+}
+
+function clearChatQueue(id) {
+    chatQueues.delete(id);
 }
 
 // ── Ждём телепорт (смещение ≥ 2 блока или таймаут) ──────
@@ -978,18 +987,21 @@ function createBot(id, config, opts = {}) {
 
         // Явно говорим серверу: view distance = 2, без подписей скина
         // уменьшает поток чанков и entity-данных от сервера
+        const settingsBase = {
+            locale: 'ru_RU', viewDistance: 2,
+            chatMode: 0, chatColors: false,
+            displayedSkinParts: 0, mainHand: 1,
+        };
         try {
+            // 1.18+ поля
             mc._client.write('settings', {
-                locale:              'ru_RU',
-                viewDistance:        2,
-                chatMode:            0,
-                chatColors:          false,
-                displayedSkinParts:  0,
-                mainHand:            1,
+                ...settingsBase,
                 enableTextFiltering: false,
                 allowServerListings: false,
             });
-        } catch {}
+        } catch {
+            try { mc._client.write('settings', settingsBase); } catch {}
+        }
     });
 
     mc.on('spawn', () => {
@@ -1602,111 +1614,124 @@ function schedulePasxa(id) {
 }
 
 // ── Открыть кейс ─────────────────────────────
+// Маршрут после /warp case: 4 вперёд → 1 вправо → 8 вперёд → 1 влево → ПКМ шалкер
 async function doOpenCase(id) {
     const b = bots.get(id);
     if (!b?.mc || b.status !== 'online') return;
     const mc = b.mc;
     addLog(id, LOG.ACTION, '/warp case — иду к шалкеру');
     try {
-        // 1. телепорт
+        // 1. Варп
         mc.chat('/warp case');
-        // ждём сообщение о телепорте или 3 сек
-        await new Promise(resolve => {
-            const t = setTimeout(resolve, 3000);
-            function onMsg(msg) {
-                if (/телепортир|варп|warp|case/i.test(msg.toString())) {
-                    clearTimeout(t);
-                    mc.removeListener('message', onMsg);
-                    resolve();
-                }
-            }
-            mc.on('message', onMsg);
-            setTimeout(() => mc.removeListener('message', onMsg), 3000);
-        });
-        await sleep(300);
+        const warped = await waitWarp(mc, S.warpTimeoutMs);
+        if (!warped) addLog(id, LOG.WARN, '/warp case: телепорт не подтверждён, продолжаем');
+        await sleep(600);
 
-        // 2. включаем физику и идём 1 блок вправо
+        // 2. Маршрут: 4 вперёд → 1 вправо → 8 вперёд → 1 влево
         const prevPhysics = mc.physicsEnabled;
         mc.physicsEnabled = true;
+        mc.setControlState('sprint', true);
+
+        mc.setControlState('forward', true);
+        await sleep(800);                          // ~4 блока вперёд
+        mc.setControlState('forward', false);
+        await sleep(80);
+
         mc.setControlState('right', true);
-        await sleep(200);
+        await sleep(200);                          // ~1 блок вправо
         mc.setControlState('right', false);
+        await sleep(80);
+
+        mc.setControlState('forward', true);
+        await sleep(1550);                         // ~8 блоков вперёд
+        mc.setControlState('forward', false);
+        await sleep(80);
+
+        mc.setControlState('left', true);
+        await sleep(200);                          // ~1 блок влево
+        mc.setControlState('left', false);
+        mc.setControlState('sprint', false);
         mc.physicsEnabled = prevPhysics;
-        await sleep(150);
+        await sleep(200);
 
-        // 3. поворачиваемся к шалкеру на 61 57 1
-        const target = { x: 61, y: 57, z: 1 };
-        const pos = mc.entity?.position;
-        if (pos) {
-            const dx = target.x - pos.x;
-            const dz = target.z - pos.z;
-            const yaw = Math.atan2(-dx, dz) * (180 / Math.PI);
-            mc.entity.yaw = yaw * (Math.PI / 180);
-        }
-        await sleep(100);
-
-        // 4. находим шалкер/блок один раз
-        const findTarget = () => {
-            const ent = Object.values(mc.entities).find(e =>
-                e.name === 'shulker' &&
-                Math.abs(e.position.x - 61) < 3 &&
-                Math.abs(e.position.z - 1) < 3
-            );
-            if (ent) return { type: 'entity', ref: ent };
+        // 3. Ищем шалкер рядом (блок или сущность)
+        const findShulker = () => {
             const blk = mc.findBlock({
-                matching: bl => bl.name === 'shulker_box' || (bl.name && bl.name.includes('shulker')),
-                maxDistance: 5,
+                matching: bl => bl && (bl.name === 'shulker_box' || bl.name?.includes('shulker')),
+                maxDistance: 4,
             });
             if (blk) return { type: 'block', ref: blk };
+            const pos = mc.entity?.position;
+            const ent = pos && Object.values(mc.entities).find(e =>
+                (e.name === 'shulker' || e.type === 'shulker') &&
+                Math.hypot(e.position.x - pos.x, e.position.z - pos.z) < 5
+            );
+            if (ent) return { type: 'entity', ref: ent };
             return null;
         };
 
-        // 5. спамим ПКМ пока окно не откроется (макс 8 сек)
-        const window = await new Promise((resolve, reject) => {
+        // 4. Спамим ПКМ пока окно шалкера не откроется (макс 8 сек)
+        addLog(id, LOG.ACTION, 'Ищу шалкер — спам ПКМ');
+        const shulkerWin = await new Promise((resolve, reject) => {
             let opened = false;
             const deadline = setTimeout(() => {
-                clearInterval(spamInterval);
+                clearInterval(spam);
                 mc.removeListener('windowOpen', onWin);
-                if (!opened) reject(new Error('Шалкер занят — окно не открылось'));
+                if (!opened) reject(new Error('Шалкер не открылся (8 сек)'));
             }, 8000);
-
             function onWin(w) {
-                opened = true;
-                clearInterval(spamInterval);
-                clearTimeout(deadline);
-                mc.removeListener('windowOpen', onWin);
-                resolve(w);
+                opened = true; clearInterval(spam); clearTimeout(deadline);
+                mc.removeListener('windowOpen', onWin); resolve(w);
             }
             mc.once('windowOpen', onWin);
-
-            // быстрый спам ПКМ каждые 150мс
-            const spamInterval = setInterval(async () => {
+            const spam = setInterval(async () => {
                 if (opened) return;
                 try {
-                    const t = findTarget();
+                    const t = findShulker();
                     if (t?.type === 'entity') await mc.activateEntityAt(t.ref);
                     else if (t?.type === 'block') await mc.activateBlock(t.ref);
                 } catch {}
-            }, 150);
-
-            // первый клик сразу
+            }, 200);
             (async () => {
                 try {
-                    const t = findTarget();
-                    if (t?.type === 'entity') { addLog(id, LOG.ACTION, 'Нашёл шалкер — спам ПКМ'); await mc.activateEntityAt(t.ref); }
-                    else if (t?.type === 'block') { addLog(id, LOG.ACTION, 'Нашёл шалкер-блок — спам ПКМ'); await mc.activateBlock(t.ref); }
-                    else addLog(id, LOG.WARN, 'Шалкер не найден, жду окно');
+                    const t = findShulker();
+                    if (t?.type === 'entity') await mc.activateEntityAt(t.ref);
+                    else if (t?.type === 'block') await mc.activateBlock(t.ref);
+                    else addLog(id, LOG.WARN, 'Шалкер не найден рядом, жду открытие...');
                 } catch {}
             })();
         });
 
-        // 6. окно открылось — кликаем слот 13
-        addLog(id, LOG.ACTION, `Окно "${window.title}" — кликаю слот 13`);
-        await sleep(100);
-        await mc.clickWindow(13, 0, 0);
-        addLog(id, LOG.SUCCESS, 'Кейс открыт');
+        // 5. Окно шалкера — ищем кейс (не стекло, не воздух)
+        addLog(id, LOG.ACTION, `Меню шалкера "${shulkerWin.title}" — ищу кейс`);
         await sleep(150);
-        try { mc.closeWindow(window); } catch {}
+        const caseSlot = shulkerWin.slots.findIndex(s =>
+            s && s.name !== 'air' &&
+            !s.name.includes('stained_glass') &&
+            s.name !== 'glass_pane' && s.name !== 'glass'
+        );
+        if (caseSlot < 0) {
+            addLog(id, LOG.WARN, 'Кейс не найден в меню (нет кейсов?)');
+            try { mc.closeWindow(shulkerWin); } catch {}
+            return;
+        }
+        addLog(id, LOG.ACTION, `Кликаю кейс (слот ${caseSlot})`);
+        await mc.clickWindow(caseSlot, 0, 0);
+        await sleep(200);
+
+        // 6. Ждём окно результата кейса и закрываем
+        const resultWin = await new Promise(resolve => {
+            const t = setTimeout(() => resolve(null), 2500);
+            mc.once('windowOpen', w => { clearTimeout(t); resolve(w); });
+        });
+        if (resultWin) {
+            addLog(id, LOG.SUCCESS, `Кейс открыт ✓ (${resultWin.title})`);
+            await sleep(300);
+            try { mc.closeWindow(resultWin); } catch {}
+        } else {
+            addLog(id, LOG.SUCCESS, 'Кейс открыт ✓');
+        }
+        try { mc.closeWindow(shulkerWin); } catch {}
         scheduleWorldCompaction(id, 1500);
 
     } catch(e) {
@@ -1714,10 +1739,18 @@ async function doOpenCase(id) {
     }
 }
 
+// ── Пасха + открыть кейс ─────────────────────
+async function doPasxaCase(id) {
+    await doPasxa(id);
+    await sleep(600);
+    await doOpenCase(id);
+}
+
 // ── Очистка ──────────────────────────────────
 function cleanup(id) {
     const b = bots.get(id); if (!b) return;
     cleanupTimers(b);
+    clearChatQueue(id);
     navWindowHandled.delete(id);
 }
 
@@ -1905,11 +1938,12 @@ app.delete('/api/bots', (_req, res) => {
 app.post('/api/bots/:id/chat', (req, res) => {
     const id = parseInt(req.params.id,10);
     const b  = bots.get(id);
-    if (!b?.mc) return res.status(400).json({error:'Бот не онлайн'});
-    const msg = req.body.message?.trim();
+    if (!b?.mc || b.status !== 'online') return res.status(400).json({error:'Бот не онлайн'});
+    const msg = String(req.body?.message || '').trim().slice(0, 256);
     if (!msg) return res.status(400).json({error:'Пустое сообщение'});
-    try { b.mc.chat(msg); addLog(id, LOG.ACTION, '> '+msg); res.json({ok:true}); }
-    catch(e) { res.status(500).json({error:e.message}); }
+    chatSafe(id, msg);
+    addLog(id, LOG.ACTION, '> ' + msg);
+    res.json({ ok: true });
 });
 
 app.post('/api/bots/:id/reconnect', (req, res) => {
@@ -1927,15 +1961,21 @@ app.post('/api/bots/broadcast', async (req, res) => {
         return res.status(400).json({ error: 'message required' });
     const msg = message.trim().slice(0, 256);
     const ids = [...bots.keys()];
-    let sent = 0;
-    for (const id of ids) {
+    // Отдаём ответ сразу — не ждём пока все боты отправят
+    const online = ids.filter(id => {
+        const b = bots.get(id);
+        return b?.mc && b.status === 'online';
+    });
+    res.json({ ok: true, sent: online.length });
+    // Стаггер: распределяем отправку по времени чтобы не спамить сервер
+    // Берём chatGapMs / 4 между ботами (мин 100мс, макс 400мс)
+    const stagger = Math.min(400, Math.max(100, Math.floor(S.chatGapMs / 4)));
+    for (const id of online) {
         const b = bots.get(id);
         if (!b?.mc || b.status !== 'online') continue;
         chatSafe(id, msg);
-        sent++;
-        await sleep(50);
+        await sleep(stagger);
     }
-    res.json({ ok: true, sent });
 });
 
 app.post('/api/bots/reconnect/all', async (req, res) => {
@@ -1979,15 +2019,22 @@ app.post('/api/bots/:id/case', async (req, res) => {
     doOpenCase(id).catch(() => {});
     res.json({ok:true});
 });
-
-// ── Кейс — для всех ботов ────────────────────
 app.post('/api/bots/case/all', async (req, res) => {
     const ids = [...bots.keys()];
     res.json({ ok: true, count: ids.length });
-    for (const id of ids) {
-        doOpenCase(id).catch(() => {});
-        await sleep(500);
-    }
+    for (const id of ids) { doOpenCase(id).catch(() => {}); await sleep(500); }
+});
+
+// ── Пасха → Кейс ─────────────────────────────
+app.post('/api/bots/:id/pasxa-case', async (req, res) => {
+    const id = parseInt(req.params.id,10);
+    doPasxaCase(id).catch(() => {});
+    res.json({ ok: true });
+});
+app.post('/api/bots/pasxa-case/all', async (req, res) => {
+    const ids = [...bots.keys()];
+    res.json({ ok: true, count: ids.length });
+    for (const id of ids) { doPasxaCase(id).catch(() => {}); await sleep(600); }
 });
 
 // ── Магазин ────────────────────────────────────
@@ -2096,6 +2143,42 @@ app.get('/api/bots/export', (req, res) => {
     res.setHeader('Content-Disposition', 'attachment; filename="bots.txt"');
     res.send(lines.join('\n'));
 });
+
+// ── MC Monitor + Agent status ─────────────────
+let mcStatus   = { online: false, rtt: 0, players: 0, max: 0, motd: '', downStreak: 0, updatedAt: null };
+let agentStatus = { active: false, totalBots: 0, onlineBots: 0, restarted: 0, stale: 0, lastAction: '', updatedAt: null };
+
+app.post('/api/mc-status', (req, res) => {
+    const b = req.body || {};
+    mcStatus = {
+        online:      !!b.online,
+        rtt:         Number(b.rtt)         || 0,
+        players:     Number(b.players)     || 0,
+        max:         Number(b.max)         || 0,
+        motd:        String(b.motd  || '').slice(0, 120),
+        downStreak:  Number(b.downStreak)  || 0,
+        updatedAt:   Date.now(),
+    };
+    io.emit('mc:status', mcStatus);
+    res.json({ ok: true });
+});
+app.get('/api/mc-status', (_req, res) => res.json(mcStatus));
+
+app.post('/api/agent-status', (req, res) => {
+    const b = req.body || {};
+    agentStatus = {
+        active:     !!b.active,
+        totalBots:  Number(b.totalBots)  || 0,
+        onlineBots: Number(b.onlineBots) || 0,
+        restarted:  Number(b.restarted)  || 0,
+        stale:      Number(b.stale)      || 0,
+        lastAction: String(b.lastAction || '').slice(0, 120),
+        updatedAt:  Date.now(),
+    };
+    io.emit('agent:status', agentStatus);
+    res.json({ ok: true });
+});
+app.get('/api/agent-status', (_req, res) => res.json(agentStatus));
 
 // ── Настройки ─────────────────────────────────
 app.get('/api/settings', (_req, res) => {

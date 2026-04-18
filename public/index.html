@@ -603,6 +603,8 @@ input[type=range] {
         <div class="stat-pill"><div class="sdot y"></div>RAM&nbsp;<b id="s-ram">—</b>&nbsp;MB</div>
         <div class="stat-pill"><div class="sdot y"></div>CPU&nbsp;<b id="s-cpu">—</b></div>
         <div class="stat-pill"><div class="sdot bl"></div>Heap&nbsp;<b id="s-heap">—</b>&nbsp;MB</div>
+        <div class="stat-pill" id="mc-pill" title="Minecraft сервер"><div class="sdot" id="mc-dot" style="background:rgba(255,255,255,.25)"></div>MC&nbsp;<b id="mc-label">—</b></div>
+        <div class="stat-pill" id="agent-pill" title="Python агент"><div class="sdot" id="agent-dot" style="background:rgba(255,255,255,.25)"></div>Агент&nbsp;<b id="agent-label">—</b></div>
       </div>
 
       <div class="nav-btns">
@@ -611,6 +613,7 @@ input[type=range] {
         <button class="btn btn-secondary" onclick="doReconnectAll()">↺ Реконнект всех</button>
         <button class="btn btn-secondary" onclick="doCaseAll()" style="border-color:rgba(57,217,138,.4);color:#39d98a;">📦 Кейс</button>
         <button class="btn btn-secondary" onclick="doPasxaAll()" style="border-color:rgba(245,184,79,.4);color:#f5b84f;">🐣 ПАСХА</button>
+        <button class="btn btn-secondary" onclick="doPasxaCaseAll()" style="border-color:rgba(245,184,79,.4);color:#f5b84f;">🐣📦 Пасха+Кейс</button>
         <button class="btn btn-secondary" id="bc-btn" onclick="openBroadcast()" style="border-color:rgba(126,182,255,.4);color:#7EB6FF;">📡 Все боты</button>
         <button class="btn btn-secondary" onclick="exportBots()" style="border-color:rgba(57,217,138,.4);color:#39d98a;">📤 Экспорт</button>
         <button class="btn btn-secondary" onclick="openImportModal()" style="border-color:rgba(245,184,79,.4);color:#f5b84f;">📥 Импорт</button>
@@ -661,6 +664,7 @@ input[type=range] {
             <button class="btn btn-secondary" onclick="doAfk()">🏊 AFK</button>
             <button class="btn btn-secondary" onclick="openShop()" style="border-color:rgba(126,182,255,.4);color:#7EB6FF;">🛒 Магазин</button>
             <button class="btn btn-secondary" onclick="doCase()" style="border-color:rgba(57,217,138,.4);color:#39d98a;">📦 Кейс</button>
+            <button class="btn btn-secondary" onclick="doPasxaCase()" style="border-color:rgba(245,184,79,.4);color:#f5b84f;">🐣📦 Пасха+Кейс</button>
             <button class="btn btn-secondary" onclick="doReconnect()">↺ Реконнект</button>
             <button class="btn btn-secondary" onclick="doClearLogs()">⌫ Очистить</button>
             <button class="btn btn-danger"    onclick="doDelete()">✕ Удалить</button>
@@ -957,6 +961,8 @@ document.addEventListener('DOMContentLoaded', () => {
     list.forEach(b => S.bots.set(b.id, {...b, logs: (b.logs||[]).slice(-CLIENT_LOG_LIMIT)}));
     renderAll();
   });
+  fetch('/api/mc-status').then(r=>r.json()).then(mc => socket.emit && socket.listeners('mc:status')[0]?.(mc)).catch(()=>{});
+  fetch('/api/agent-status').then(r=>r.json()).then(ag => socket.emit && socket.listeners('agent:status')[0]?.(ag)).catch(()=>{});
   document.getElementById('modal').addEventListener('click', e => {
     if (e.target===e.currentTarget) closeModal();
   });
@@ -984,6 +990,29 @@ socket.on('stats:live', s => {
   });
   renderSidebar();
   renderStrip();
+});
+
+socket.on('mc:status', mc => {
+  const dot = el('mc-dot'), lbl = el('mc-label');
+  if (!dot || !lbl) return;
+  if (mc.online) {
+    dot.style.background = '#39d98a';
+    lbl.textContent = mc.rtt + 'ms ' + mc.players + '/' + mc.max;
+  } else {
+    dot.style.background = '#ff4c4c';
+    lbl.textContent = 'OFFLINE' + (mc.downStreak > 1 ? ' ×' + mc.downStreak : '');
+  }
+});
+socket.on('agent:status', ag => {
+  const dot = el('agent-dot'), lbl = el('agent-label');
+  if (!dot || !lbl) return;
+  if (ag.active) {
+    dot.style.background = '#39d98a';
+    lbl.textContent = ag.onlineBots + '/' + ag.totalBots + (ag.restarted ? ' ↺' + ag.restarted : '');
+  } else {
+    dot.style.background = 'rgba(255,255,255,.25)';
+    lbl.textContent = 'СТОП';
+  }
 });
 
 socket.on('bot:created', b => {
@@ -1180,6 +1209,14 @@ async function doCase() {
   catch(e) { Toast.error(e.message); }
 }
 
+async function doPasxaCase() {
+  const b = getBot(); if (!b) return;
+  try {
+    await api(`/api/bots/${b.id}/pasxa-case`, {method:'POST'});
+    Toast.success('Пасха → Кейс запущен', '🐣📦');
+  } catch(e) { Toast.error(e.message); }
+}
+
 async function doPasxaAll() {
   const count = S.bots.size;
   if (!count) { Toast.info('Нет активных ботов'); return; }
@@ -1204,6 +1241,15 @@ async function doCaseAll() {
   try {
     await api('/api/bots/case/all', {method:'POST'});
     Toast.success(`Кейс запущен для ${count} ботов`, '📦 Кейс');
+  } catch(e) { Toast.error(e.message); }
+}
+
+async function doPasxaCaseAll() {
+  const count = S.bots.size;
+  if (!count) { Toast.info('Нет активных ботов'); return; }
+  try {
+    await api('/api/bots/pasxa-case/all', {method:'POST'});
+    Toast.success(`Пасха → Кейс запущен для ${count} ботов`, '🐣📦');
   } catch(e) { Toast.error(e.message); }
 }
 
