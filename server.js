@@ -778,6 +778,8 @@ function setStage(id, stage) {
 function broadcastStats() {
     const all = [...bots.values()];
     const mem = process.memoryUsage();
+    const rilksCasesTotal = all.reduce((s,b) => s + (b.rilksCases||0), 0);
+    const casesGotTotal   = all.reduce((s,b) => s + (b.casesGot||0), 0);
     io.emit('stats', {
         total:   all.length,
         online:  all.filter(b => b.status === 'online').length,
@@ -786,6 +788,8 @@ function broadcastStats() {
         ram:     Math.round(mem.rss / 1024 / 1024),
         heap:    Math.round(mem.heapUsed / 1024 / 1024),
         cpu:     currentCpu,
+        rilksCasesTotal,
+        casesGotTotal,
     });
     broadcastRelicsSummary();
 }
@@ -848,6 +852,11 @@ function createRuntimeState() {
         stage: STAGE.OFFLINE,
         auth: { authenticated: false, lastMode: null, lastAt: 0, attempts: { register: 0, login: 0 } },
         shopSession: null, shopScanResult: null,
+        // Дропы с кейсов
+        drops: [],          // [{type, prize, ts}] — последние 30 выбитых наград
+        rilksCases: 0,      // сколько riliks-кейсов получено
+        casesGot: 0,        // всего кейсов любого типа получено
+        _pendingCaseType: null,
     };
 }
 function cleanupTimers(b) {
@@ -862,6 +871,70 @@ function resetRuntime(b, { preserveReconnect = false } = {}) {
     cleanupTimers(b);
     navWindowHandled.delete(b.id);
     Object.assign(b, createRuntimeState(), { reconnectAttempts, suppressReconnect: false, disconnectHandled: false });
+}
+
+// ── Парсинг дропов с кейсов ──────────────────
+function parseCaseDrop(id, text) {
+    const b = bots.get(id);
+    if (!b) return;
+
+    // "Кейсы >> Вы получили 1 кейсов типа pasxa2026"
+    // "Кейсы >> Вы получили 1 кейсов типа riliks"
+    const caseRx = /кейс[ыов]*\s*[»>]+\s*вы\s+получили\s+\d+\s+кейсов?\s+типа\s+(\S+)/iu;
+    const caseM  = text.match(caseRx);
+    if (caseM) {
+        const caseType = caseM[1];
+        const isRiliks = /riliks|рилл|рилик/i.test(caseType);
+        b._pendingCaseType = caseType;
+        b.casesGot = (b.casesGot || 0) + 1;
+        if (isRiliks) b.rilksCases = (b.rilksCases || 0) + 1;
+        const label = isRiliks ? `${caseType} 🏆` : caseType;
+        addLog(id, LOG.SUCCESS, `Кейс получен: ${label}`);
+        io.emit('bot:drop', { id, event: 'case_received', caseType, isRiliks, ts: Date.now() });
+        broadcastStats();
+        return;
+    }
+
+    // "Риллики >> Вы получили 250 [R]."
+    const riliksRx = /рилл?ик[иа]?\s*[»>]+\s*вы\s+получили\s+([\d\s,.]+)\s*\[?р\]?/iu;
+    const riliksM  = text.match(riliksRx);
+    if (riliksM) {
+        const amount = parseInt(riliksM[1].replace(/[\s,.]/g, '')) || 0;
+        if (amount > 0) {
+            const drop = { type: b._pendingCaseType || 'riliks', prize: amount + ' R', ts: Date.now() };
+            b.drops = [drop, ...(b.drops || [])].slice(0, 30);
+            addLog(id, LOG.SUCCESS, `Риллики: +${amount} R 🏆`);
+            io.emit('bot:drop', { id, event: 'riliks', ...drop });
+            b._pendingCaseType = null;
+        }
+        return;
+    }
+
+    // "Награды >> Вы успешно получили награду." (после /pasxa или открытия кейса)
+    if (/награды?\s*[»>]+\s*вы\s+успешно\s+получили\s+награду/iu.test(text)) {
+        const drop = { type: b._pendingCaseType || 'кейс', prize: 'награда', ts: Date.now() };
+        b.drops = [drop, ...(b.drops || [])].slice(0, 30);
+        addLog(id, LOG.SUCCESS, `Награда получена ✓`);
+        io.emit('bot:drop', { id, event: 'reward', ...drop });
+        b._pendingCaseType = null;
+        return;
+    }
+
+    // Broadcast-сообщение о выигрыше (видно всем): "Игрок X выиграл 500,000 [R]"
+    // Проверяем что это наш бот
+    const winRx = /игрок\s+(\S+)\s+выиграл\s+([\d\s,.']+)\s*\[?р\]?/iu;
+    const winM  = text.match(winRx);
+    if (winM) {
+        const winner  = winM[1];
+        const amount  = parseInt(winM[2].replace(/[\s,.']/g, '')) || 0;
+        if (winner === b.config.username && amount > 0) {
+            const drop = { type: b._pendingCaseType || 'кейс', prize: amount + ' R', ts: Date.now() };
+            b.drops = [drop, ...(b.drops || [])].slice(0, 30);
+            addLog(id, LOG.SUCCESS, `Выиграно: ${amount} R 🎉`);
+            io.emit('bot:drop', { id, event: 'win', ...drop });
+            b._pendingCaseType = null;
+        }
+    }
 }
 
 // ── Авторизация ──────────────────────────────
@@ -1041,6 +1114,9 @@ function createBot(id, config, opts = {}) {
         if (!text) return;
         const isSystem = /login|register|добро пожаловать|welcome|free|награда|warp|afk|авториз|регист/i.test(text);
         if (isSystem) addLog(id, LOG.SYSTEM, text);
+        // Парсим дропы кейсов
+        parseCaseDrop(id, text);
+        // Авторизация
         const intent = detectAuthIntent(text);
         if (!intent) return;
         if (intent.mode === 'authenticated') { markAuthenticated(id); return; }
@@ -1746,6 +1822,19 @@ async function doPasxaCase(id) {
     await doOpenCase(id);
 }
 
+// ── Принудительная пасха (без проверки часа и pasxaDone) ──
+async function doPasxaForce(id) {
+    const b = bots.get(id);
+    if (!b?.mc || b.status !== 'online') return;
+    b.pasxaDone = false; // сбрасываем флаг чтобы doPasxa сработал
+    await doPasxa(id);
+}
+async function doPasxaCaseForce(id) {
+    await doPasxaForce(id);
+    await sleep(600);
+    await doOpenCase(id);
+}
+
 // ── Очистка ──────────────────────────────────
 function cleanup(id) {
     const b = bots.get(id); if (!b) return;
@@ -1780,8 +1869,9 @@ app.post('/api/logout', (req, res) => {
 
 
 app.get('/api/bots', (_req, res) => {
-    res.json([...bots.values()].map(({id,config,status,stage,logs,connectedAt,nextFreeIndex,relics,riliky})=>
-        ({id,config,status,stage,logs,connectedAt,nextFreeIndex,relics,riliky})
+    res.json([...bots.values()].map(({id,config,status,stage,logs,connectedAt,nextFreeIndex,relics,riliky,drops,rilksCases,casesGot})=>
+        ({id,config,status,stage,logs,connectedAt,nextFreeIndex,relics,riliky,
+          drops:(drops||[]).slice(0,10), rilksCases:rilksCases||0, casesGot:casesGot||0})
     ));
 });
 
@@ -2035,6 +2125,38 @@ app.post('/api/bots/pasxa-case/all', async (req, res) => {
     const ids = [...bots.keys()];
     res.json({ ok: true, count: ids.length });
     for (const id of ids) { doPasxaCase(id).catch(() => {}); await sleep(600); }
+});
+
+// ── Забрать Пасху принудительно (без проверки часа) ──
+app.post('/api/bots/:id/pasxa-grab', async (req, res) => {
+    const id = parseInt(req.params.id,10);
+    doPasxaForce(id).catch(() => {});
+    res.json({ ok: true });
+});
+app.post('/api/bots/pasxa-grab/all', async (req, res) => {
+    const ids = [...bots.keys()];
+    res.json({ ok: true, count: ids.length });
+    for (const id of ids) { doPasxaForce(id).catch(() => {}); await sleep(400); }
+});
+app.post('/api/bots/:id/pasxa-grab-case', async (req, res) => {
+    const id = parseInt(req.params.id,10);
+    doPasxaCaseForce(id).catch(() => {});
+    res.json({ ok: true });
+});
+app.post('/api/bots/pasxa-grab-case/all', async (req, res) => {
+    const ids = [...bots.keys()];
+    res.json({ ok: true, count: ids.length });
+    for (const id of ids) { doPasxaCaseForce(id).catch(() => {}); await sleep(600); }
+});
+
+// ── Дропы ─────────────────────────────────────
+app.get('/api/drops', (_req, res) => {
+    const all = [];
+    for (const b of bots.values()) {
+        for (const d of (b.drops || [])) all.push({ ...d, username: b.config.username, id: b.id });
+    }
+    all.sort((a,b) => b.ts - a.ts);
+    res.json(all.slice(0, 100));
 });
 
 // ── Магазин ────────────────────────────────────

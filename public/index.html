@@ -340,6 +340,35 @@ a,button,input,select,textarea,label { cursor: none !important; }
 @keyframes blink { 50% { opacity: .1; } }
 
 /* Input bar */
+/* ── Дропы ── */
+.drops-panel {
+  border-top: 1px solid rgba(167,139,250,.18);
+  padding: .6rem 1.25rem .5rem;
+  flex-shrink: 0;
+}
+.drops-hdr {
+  font-size: .72rem; font-weight: 700; color: #a78bfa;
+  margin-bottom: .4rem; display: flex; align-items: center; gap: .5rem;
+}
+.drops-badge {
+  background: rgba(167,139,250,.2); border: 1px solid rgba(167,139,250,.4);
+  border-radius: 20px; padding: .1rem .5rem; font-size: .65rem; color: #a78bfa;
+}
+.drops-list {
+  display: flex; flex-direction: column; gap: .25rem;
+  max-height: 120px; overflow-y: auto;
+}
+.drop-row {
+  display: flex; align-items: center; gap: .5rem;
+  font-size: .72rem; color: #ddd;
+  padding: .2rem .4rem; border-radius: 6px;
+  background: rgba(255,255,255,.03);
+}
+.drop-row .drop-ts { color: #666; font-size: .65rem; flex-shrink: 0; }
+.drop-row .drop-type { color: #a78bfa; font-size: .65rem; }
+.drop-row .drop-prize { color: #f5b84f; font-weight: 600; margin-left: auto; }
+.drop-row.riliks { background: rgba(167,139,250,.08); }
+
 .cmd-bar {
   display: grid; grid-template-columns: minmax(0,1fr) auto;
   gap: .75rem; padding: 1rem 1.5rem 1.25rem;
@@ -605,6 +634,8 @@ input[type=range] {
         <div class="stat-pill"><div class="sdot bl"></div>Heap&nbsp;<b id="s-heap">—</b>&nbsp;MB</div>
         <div class="stat-pill" id="mc-pill" title="Minecraft сервер"><div class="sdot" id="mc-dot" style="background:rgba(255,255,255,.25)"></div>MC&nbsp;<b id="mc-label">—</b></div>
         <div class="stat-pill" id="agent-pill" title="Python агент"><div class="sdot" id="agent-dot" style="background:rgba(255,255,255,.25)"></div>Агент&nbsp;<b id="agent-label">—</b></div>
+        <div class="stat-pill" title="Кейсов получено всего"><div class="sdot" style="background:#f5b84f"></div>Кейсы&nbsp;<b id="s-cases">0</b></div>
+        <div class="stat-pill" title="Riliks-кейсов получено"><div class="sdot" style="background:#a78bfa"></div>Riliks&nbsp;<b id="s-rilks">0</b></div>
       </div>
 
       <div class="nav-btns">
@@ -613,6 +644,8 @@ input[type=range] {
         <button class="btn btn-secondary" onclick="doReconnectAll()">↺ Реконнект всех</button>
         <button class="btn btn-secondary" onclick="doCaseAll()" style="border-color:rgba(57,217,138,.4);color:#39d98a;">📦 Кейс</button>
         <button class="btn btn-secondary" onclick="doPasxaAll()" style="border-color:rgba(245,184,79,.4);color:#f5b84f;">🐣 ПАСХА</button>
+        <button class="btn btn-secondary" onclick="doPasxaGrabAll()" style="border-color:rgba(167,139,250,.5);color:#a78bfa;" title="Забрать /pasxa прямо сейчас (без проверки часа)">🐣 Забрать</button>
+        <button class="btn btn-secondary" onclick="doPasxaGrabCaseAll()" style="border-color:rgba(167,139,250,.5);color:#a78bfa;" title="Забрать /pasxa и сразу открыть кейс">🐣📦 Забрать+Кейс</button>
         <button class="btn btn-secondary" onclick="doPasxaCaseAll()" style="border-color:rgba(245,184,79,.4);color:#f5b84f;">🐣📦 Пасха+Кейс</button>
         <button class="btn btn-secondary" id="bc-btn" onclick="openBroadcast()" style="border-color:rgba(126,182,255,.4);color:#7EB6FF;">📡 Все боты</button>
         <button class="btn btn-secondary" onclick="exportBots()" style="border-color:rgba(57,217,138,.4);color:#39d98a;">📤 Экспорт</button>
@@ -664,6 +697,8 @@ input[type=range] {
             <button class="btn btn-secondary" onclick="doAfk()">🏊 AFK</button>
             <button class="btn btn-secondary" onclick="openShop()" style="border-color:rgba(126,182,255,.4);color:#7EB6FF;">🛒 Магазин</button>
             <button class="btn btn-secondary" onclick="doCase()" style="border-color:rgba(57,217,138,.4);color:#39d98a;">📦 Кейс</button>
+            <button class="btn btn-secondary" onclick="doPasxaGrab()" style="border-color:rgba(167,139,250,.5);color:#a78bfa;" title="Забрать /pasxa прямо сейчас">🐣 Забрать</button>
+            <button class="btn btn-secondary" onclick="doPasxaGrabCase()" style="border-color:rgba(167,139,250,.5);color:#a78bfa;" title="Забрать + открыть кейс">🐣📦 Забрать+Кейс</button>
             <button class="btn btn-secondary" onclick="doPasxaCase()" style="border-color:rgba(245,184,79,.4);color:#f5b84f;">🐣📦 Пасха+Кейс</button>
             <button class="btn btn-secondary" onclick="doReconnect()">↺ Реконнект</button>
             <button class="btn btn-secondary" onclick="doClearLogs()">⌫ Очистить</button>
@@ -676,6 +711,12 @@ input[type=range] {
 
         <!-- Console -->
         <div class="console" id="console"></div>
+
+        <!-- Дропы с кейсов -->
+        <div class="drops-panel" id="d-drops" style="display:none">
+          <div class="drops-hdr">🎁 Дропы с кейсов <span id="d-rilks-badge" class="drops-badge"></span></div>
+          <div class="drops-list" id="d-drops-list"></div>
+        </div>
 
         <!-- Command bar -->
         <div class="cmd-bar">
@@ -979,6 +1020,8 @@ socket.on('stats', s => {
   el('s-ram').textContent     = s.ram;
   el('s-cpu').textContent     = typeof s.cpu==='number' ? s.cpu+'%' : '—';
   if (s.heap != null) el('s-heap').textContent = s.heap;
+  if (s.casesGotTotal   != null) el('s-cases').textContent = s.casesGotTotal;
+  if (s.rilksCasesTotal != null) el('s-rilks').textContent = s.rilksCasesTotal;
 });
 
 socket.on('stats:live', s => {
@@ -990,6 +1033,22 @@ socket.on('stats:live', s => {
   });
   renderSidebar();
   renderStrip();
+});
+
+socket.on('bot:drop', ({ id, event, type, prize, ts, caseType, isRiliks }) => {
+  const b = S.bots.get(id);
+  if (!b) return;
+  if (!b.drops) b.drops = [];
+  if (event === 'case_received') {
+    if (!b.rilksCases) b.rilksCases = 0;
+    if (!b.casesGot)   b.casesGot   = 0;
+    b.casesGot++;
+    if (isRiliks) b.rilksCases++;
+  } else if (type && prize) {
+    b.drops.unshift({ type, prize, ts });
+    if (b.drops.length > 30) b.drops.pop();
+  }
+  if (S.sel === id) renderDrops(b);
 });
 
 socket.on('mc:status', mc => {
@@ -1164,6 +1223,7 @@ function appendLine({type,text,ts}, scroll=true) {
 function selectBot(id) {
   S.sel=id; S.hist=[]; S.histIdx=-1;
   renderAll();
+  renderDrops(id ? S.bots.get(id) : null);
   if (id) setTimeout(()=>el('cmd-input')?.focus(), 60);
 }
 function getBot() { return S.sel ? S.bots.get(S.sel) : null; }
@@ -1249,8 +1309,62 @@ async function doPasxaCaseAll() {
   if (!count) { Toast.info('Нет активных ботов'); return; }
   try {
     await api('/api/bots/pasxa-case/all', {method:'POST'});
-    Toast.success(`Пасха → Кейс запущен для ${count} ботов`, '🐣📦');
+    Toast.success(`Пасха → Кейс для ${count} ботов`, '🐣📦');
   } catch(e) { Toast.error(e.message); }
+}
+
+async function doPasxaGrab() {
+  const b = getBot(); if (!b) return;
+  try { await api(`/api/bots/${b.id}/pasxa-grab`, {method:'POST'}); Toast.success('Забираю /pasxa...', '🐣'); }
+  catch(e) { Toast.error(e.message); }
+}
+async function doPasxaGrabAll() {
+  const count = S.bots.size;
+  if (!count) { Toast.info('Нет активных ботов'); return; }
+  try {
+    await api('/api/bots/pasxa-grab/all', {method:'POST'});
+    Toast.success(`Забрать /pasxa для ${count} ботов`, '🐣');
+  } catch(e) { Toast.error(e.message); }
+}
+async function doPasxaGrabCase() {
+  const b = getBot(); if (!b) return;
+  try { await api(`/api/bots/${b.id}/pasxa-grab-case`, {method:'POST'}); Toast.success('Забираю /pasxa + кейс...', '🐣📦'); }
+  catch(e) { Toast.error(e.message); }
+}
+async function doPasxaGrabCaseAll() {
+  const count = S.bots.size;
+  if (!count) { Toast.info('Нет активных ботов'); return; }
+  try {
+    await api('/api/bots/pasxa-grab-case/all', {method:'POST'});
+    Toast.success(`Забрать /pasxa + кейс для ${count} ботов`, '🐣📦');
+  } catch(e) { Toast.error(e.message); }
+}
+
+function renderDrops(b) {
+  const panel = el('d-drops');
+  const list  = el('d-drops-list');
+  const badge = el('d-rilks-badge');
+  if (!b) { panel.style.display = 'none'; return; }
+  const drops = b.drops || [];
+  if (drops.length === 0 && !(b.rilksCases || b.casesGot)) {
+    panel.style.display = 'none'; return;
+  }
+  panel.style.display = '';
+  // badge
+  const parts = [];
+  if (b.casesGot)   parts.push(`Кейсов: ${b.casesGot}`);
+  if (b.rilksCases) parts.push(`Riliks: ${b.rilksCases} 🏆`);
+  badge.textContent = parts.join(' · ');
+
+  list.innerHTML = drops.map(d => {
+    const t = d.ts ? new Date(d.ts).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '';
+    const isRiliks = /riliks/i.test(d.type||'') || /\bR\b/.test(d.prize||'');
+    return `<div class="drop-row${isRiliks?' riliks':''}">
+      <span class="drop-ts">[${t}]</span>
+      <span class="drop-type">${d.type||'?'}</span>
+      <span class="drop-prize">${d.prize||'?'}</span>
+    </div>`;
+  }).join('');
 }
 
 function doClearLogs() {
