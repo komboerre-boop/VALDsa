@@ -1431,14 +1431,14 @@ async function openShop() {
 
 async function shopClick(slot) {
   if (!shopBotId) return;
+  const qty = Math.max(1, Math.min(99, parseInt(el('shop-qty')?.value, 10) || 1));
   try {
     const r = await api(`/api/bots/${shopBotId}/shop/click`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ slot })
+      body: JSON.stringify({ slot, qty })
     });
-    if (r.bought) Toast.success('Куплено!', '🛒');
-    shopData = r.shop;
-    renderShopGrid();
+    if (r.bought) Toast.success(r.boughtQty > 1 ? `Куплено x${r.boughtQty}!` : 'Куплено!', '🛒');
+    if (r.shop) { shopData = r.shop; renderShopGrid(); }
   } catch(e) { Toast.error('Клик: ' + e.message); }
 }
 
@@ -1654,6 +1654,11 @@ async function doImport() {
   <div class="shop-card">
     <div class="shop-hdr">
       <div class="shop-title" id="shop-title">Магазин</div>
+      <label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:#aaa;white-space:nowrap">
+        Кол-во:
+        <input id="shop-qty" type="number" min="1" max="99" value="1"
+          style="width:3.5rem;background:rgba(255,255,255,.07);border:1px solid rgba(126,182,255,.2);border-radius:6px;color:#fff;padding:.2rem .4rem;font-size:.75rem;text-align:center">
+      </label>
       <button class="btn btn-secondary" id="shop-scan-btn" onclick="doShopScan()" style="font-size:.7rem;padding:.3rem .8rem;">🔍 Сканировать всё</button>
       <button class="btn btn-secondary" onclick="closeShop()" style="font-size:.7rem;padding:.3rem .8rem;">✕</button>
     </div>

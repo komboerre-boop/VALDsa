@@ -286,7 +286,7 @@ async function openShopCmd(id, cmd = '/shop') {
     const b = bots.get(id);
     if (!b?.mc) return null;
     return new Promise(resolve => {
-        const timer = setTimeout(() => { b.mc?.removeListener?.('windowOpen', onWin); resolve(null); }, 8000);
+        const timer = setTimeout(() => { b.mc?.removeListener?.('windowOpen', onWin); resolve(null); }, 4000);
         const onWin = w => { clearTimeout(timer); resolve(w); };
         b.mc.once('windowOpen', onWin);
         b.mc.chat(cmd);
@@ -297,7 +297,7 @@ async function clickAndWaitWin(id, slot) {
     const b = bots.get(id);
     if (!b?.mc) return null;
     return new Promise(async resolve => {
-        const timer = setTimeout(() => { b.mc?.removeListener?.('windowOpen', onWin); resolve(null); }, 3000);
+        const timer = setTimeout(() => { b.mc?.removeListener?.('windowOpen', onWin); resolve(null); }, 1200);
         const onWin = w => { clearTimeout(timer); resolve(w); };
         b.mc.once('windowOpen', onWin);
         try { await b.mc.clickWindow(slot, 0, 0); } catch { clearTimeout(timer); b.mc?.removeListener?.('windowOpen', onWin); resolve(null); }
@@ -325,13 +325,13 @@ async function scanShopFull(id) {
                 result.items.push(...items.map(i => ({ ...i, section: cand.name })));
                 addLog(id, LOG.INFO, `  ${cand.name}: ${items.length} позиций`);
                 try { cur.mc.closeWindow(newWin); } catch {}
-                await sleep(600);
+                await sleep(150);
                 rootWin = await openShopCmd(id, '/shop');
                 if (!rootWin) break;
             } else if (cand.price != null) {
                 result.items.push({ ...cand, section: 'root' });
             }
-            await sleep(300);
+            await sleep(100);
         }
         const cur = bots.get(id);
         try { if (cur?.mc?.currentWindow) cur.mc.closeWindow(cur.mc.currentWindow); } catch {}
@@ -1156,7 +1156,7 @@ async function goAfk(id) {
             waitChatMsg(mc, /телепортир|варп|warp|afk/i, AFK_TELEPORT_TIMEOUT_MS).then(m => !!m),
         ]);
         if (!warped) addLog(id, LOG.WARN, '/warp afk — телепорт не подтверждён, идём дальше');
-        await sleep(500);
+        await sleep(200);
         mc.physicsEnabled = true;
         const walked = await walkForward(mc, AFK_MOVE_DURATION_MS);
         b.afkDone = true;
@@ -1238,10 +1238,10 @@ function markEnteredGrief(id) {
         if (b.afkTimer) { clearTimeout(b.afkTimer); b.afkTimer = null; }
         b.afkTimer = setTimeout(() => {
             goAfk(id).catch(e => addLog(id, LOG.ERROR, 'AFK: ' + e.message));
-        }, 1500);
+        }, 500);
     }
 
-    setTimeout(() => tryStartKitFarm(id), 1500);
+    setTimeout(() => tryStartKitFarm(id), 500);
 }
 
 // Овнер-бот прописывает всех остальных ботов и запускает их подключение
@@ -1339,7 +1339,7 @@ async function collectFreeRewards(id, window) {
         for (const slot of slots) {
             if (!b.mc) break;
             try {
-                await sleep(600);
+                await sleep(250);
                 await b.mc.clickWindow(slot, 0, 0);
                 addLog(id, LOG.SUCCESS, `Награда слот ${slot} ✓`);
             } catch(e) {
@@ -1347,7 +1347,7 @@ async function collectFreeRewards(id, window) {
             }
         }
     }
-    await sleep(500);
+    await sleep(200);
     try { if (b.mc) b.mc.closeWindow(window); } catch {}
     b.collectingFree = false;
     b.nextFreeIndex++;
@@ -1375,12 +1375,12 @@ async function doKitFarm(id) {
 
     try {
         // 1. Телепорт на /warp mamka
-        await sleep(2000); // дать серверу зарегистрировать бота после входа
+        await sleep(500); // дать серверу зарегистрировать бота после входа
         addLog(id, LOG.ACTION, '/warp mamka');
         mc.chat('/warp mamka');
         const warped = await waitWarp(mc, 9000);
         if (!warped) addLog(id, LOG.WARN, '/warp mamka — телепорт не подтверждён, продолжаем');
-        await sleep(800);
+        await sleep(300);
 
         // 2. Берём киты с повтором при кулдауне (до 3 попыток)
         for (const kit of KIT_FARM_KITS) {
@@ -1401,11 +1401,11 @@ async function doKitFarm(id) {
                     break; // успешно или другой ответ
                 }
             }
-            await sleep(800);
+            await sleep(300);
         }
 
         // 3. Ищем ближайший сундук и выкладываем предметы
-        await sleep(800);
+        await sleep(300);
         const chestPos = findNearestChest(mc);
         if (!chestPos) {
             addLog(id, LOG.WARN, 'Сундук не найден рядом (радиус 10) — пропускаю выгрузку');
@@ -1414,11 +1414,11 @@ async function doKitFarm(id) {
             try {
                 const chestBlock = mc.blockAt(chestPos);
                 const container = await mc.openContainer(chestBlock);
-                await sleep(600);
+                await sleep(200);
                 await dumpFoodToChest(id, container);
-                await sleep(300);
+                await sleep(100);
                 container.close();
-                await sleep(400);
+                await sleep(150);
             } catch(e) {
                 addLog(id, LOG.ERROR, `Ошибка открытия сундука: ${e.message}`);
             }
@@ -1528,16 +1528,16 @@ async function doOpenCase(id) {
             mc.on('message', onMsg);
             setTimeout(() => mc.removeListener('message', onMsg), 3000);
         });
-        await sleep(800);
+        await sleep(300);
 
         // 2. включаем физику и идём 1 блок вправо
         const prevPhysics = mc.physicsEnabled;
         mc.physicsEnabled = true;
         mc.setControlState('right', true);
-        await sleep(600);
+        await sleep(200);
         mc.setControlState('right', false);
         mc.physicsEnabled = prevPhysics;
-        await sleep(400);
+        await sleep(150);
 
         // 3. поворачиваемся к шалкеру на 61 57 1
         const target = { x: 61, y: 57, z: 1 };
@@ -1548,7 +1548,7 @@ async function doOpenCase(id) {
             const yaw = Math.atan2(-dx, dz) * (180 / Math.PI);
             mc.entity.yaw = yaw * (Math.PI / 180);
         }
-        await sleep(300);
+        await sleep(100);
 
         // 4. находим шалкер/блок один раз
         const findTarget = () => {
@@ -1607,10 +1607,10 @@ async function doOpenCase(id) {
 
         // 6. окно открылось — кликаем слот 13
         addLog(id, LOG.ACTION, `Окно "${window.title}" — кликаю слот 13`);
-        await sleep(300);
+        await sleep(100);
         await mc.clickWindow(13, 0, 0);
         addLog(id, LOG.SUCCESS, 'Кейс открыт');
-        await sleep(400);
+        await sleep(150);
         try { mc.closeWindow(window); } catch {}
         scheduleWorldCompaction(id, 1500);
 
@@ -1915,6 +1915,7 @@ app.post('/api/bots/:id/shop/click', async (req, res) => {
     if (!b.shopSession) return res.status(400).json({ error: 'Магазин не открыт' });
     const slot = parseInt(req.body?.slot, 10);
     if (isNaN(slot)) return res.status(400).json({ error: 'slot required' });
+    const qty = Math.max(1, Math.min(99, parseInt(req.body?.qty, 10) || 1));
     try {
         const newWin = await clickAndWaitWin(id, slot);
         if (newWin) {
@@ -1923,8 +1924,17 @@ app.post('/api/bots/:id/shop/click', async (req, res) => {
             res.json({ ok: true, navigated: true, shop: parsed });
         } else {
             const slotInfo = b.shopSession.parsed.slots.find(s => s.index === slot);
-            if (slotInfo?.price != null) addLog(id, LOG.SUCCESS, `Куплено: ${slotInfo.name} (${slotInfo.price})`);
-            res.json({ ok: true, navigated: false, bought: slotInfo?.price != null, shop: b.shopSession.parsed });
+            let bought = 0;
+            if (slotInfo?.price != null) {
+                bought = 1;
+                for (let i = 1; i < qty; i++) {
+                    await sleep(400);
+                    if (!b.mc || !b.shopSession) break;
+                    try { await b.mc.clickWindow(slot, 0, 0); bought++; } catch { break; }
+                }
+                addLog(id, LOG.SUCCESS, `Куплено: ${slotInfo.name} x${bought} (${slotInfo.price} каждый)`);
+            }
+            res.json({ ok: true, navigated: false, bought: bought > 0, boughtQty: bought, shop: b.shopSession?.parsed });
         }
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
