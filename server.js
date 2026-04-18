@@ -35,7 +35,7 @@ const MAX_LOG_TEXT_LEN      = 220;
 const CHUNK_GC_INTERVAL_MS  = 30000;
 const CHUNK_COMPACT_DELAY_MS = 4000;
 const LOW_MEMORY_VIEW_DISTANCE = 'tiny';
-const BATCH_START_STAGGER_MS = 200;
+const BATCH_START_STAGGER_MS = 450;
 const DEFAULT_START_WAVE_SIZE = 10;
 const MAX_START_WAVE_SIZE   = 50;
 const DEFAULT_WAVE_DELAY_MS = 4000;
@@ -819,7 +819,7 @@ function cleanupTimers(b) {
     ['freeTimer','navTimer','afkTimer','authTimer','chunkTimer','startTimer','reconnectTimer','relicsTimer','pasxaTimer'].forEach(k => {
         if (b[k]) { clearTimeout(b[k]); b[k] = null; }
     });
-    if (b.antiTimeoutTimer) { clearInterval(b.antiTimeoutTimer); b.antiTimeoutTimer = null; }
+    if (b.antiTimeoutTimer) { clearTimeout(b.antiTimeoutTimer); b.antiTimeoutTimer = null; }
 }
 function resetRuntime(b, { preserveReconnect = false } = {}) {
     const reconnectAttempts = preserveReconnect ? (b.reconnectAttempts || 0) : 0;
@@ -948,11 +948,29 @@ function createBot(id, config, opts = {}) {
         b.disconnectHandled = false;
         setStage(id, STAGE.LOBBY);
         scheduleRelicsRefresh(id, 1800);
+
+        // Явно говорим серверу: view distance = 2, без подписей скина
+        // уменьшает поток чанков и entity-данных от сервера
+        try {
+            mc._client.write('settings', {
+                locale:              'ru_RU',
+                viewDistance:        2,
+                chatMode:            0,
+                chatColors:          false,
+                displayedSkinParts:  0,
+                mainHand:            1,
+                enableTextFiltering: false,
+                allowServerListings: false,
+            });
+        } catch {}
     });
 
     mc.on('spawn', () => {
         if (b.mc !== mc) return;
         addLog(id, LOG.INFO, 'Заспавнился');
+        // Отключаем физику принудительно после спауна — исключает автоотправку
+        // position-пакетов (20/с) пока бот не двигается намеренно
+        mc.physicsEnabled = false;
         startAntiTimeout(id, mc);
         const cur = bots.get(id); if (!cur) return;
 
@@ -1197,20 +1215,35 @@ async function walkForward(mc, dur) {
     return hDist(mc.entity?.position, start);
 }
 
-// ── Анти-таймаут: раз в 20с слегка поворачиваем взгляд ──
+// ── Анти-таймаут: редкие небольшие повороты, без накопления дрейфа ──
 function startAntiTimeout(id, mc) {
     const b = bots.get(id);
     if (!b || b.antiTimeoutTimer) return;
-    b.antiTimeoutTimer = setInterval(() => {
+    // Сохраняем базовый угол поворота — не даём дрейфу накапливаться
+    b._atBaseYaw = mc.entity?.yaw ?? 0;
+    b._atDir     = 1;
+
+    const tick = () => {
         const cur = bots.get(id);
-        if (!cur?.mc || cur.mc !== mc || cur.status !== 'online') {
-            clearInterval(b.antiTimeoutTimer); b.antiTimeoutTimer = null; return;
-        }
+        if (!cur?.mc || cur.mc !== mc || cur.status !== 'online') return;
         try {
             const e = cur.mc.entity;
-            if (e) cur.mc.look(e.yaw + 0.001, e.pitch, false);
+            if (e) {
+                // Чередуем лево/право ±1.5–3° — выглядит как ручная подправка
+                const deg = (0.026 + Math.random() * 0.026) * cur._atDir;
+                cur._atDir *= -1;
+                cur.mc.look(cur._atBaseYaw + deg, e.pitch, false);
+            }
         } catch {}
-    }, 20000);
+        // Следующий тик — случайно через 32–55 с чтобы боты не синхронизировались
+        const delay = 32000 + Math.floor(Math.random() * 23000);
+        cur._atTimer = setTimeout(tick, delay);
+        cur._atTimer?.unref?.();
+        cur.antiTimeoutTimer = cur._atTimer;
+    };
+
+    const firstDelay = 30000 + Math.floor(Math.random() * 15000);
+    b.antiTimeoutTimer = setTimeout(tick, firstDelay);
     b.antiTimeoutTimer?.unref?.();
 }
 
