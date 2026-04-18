@@ -7,8 +7,14 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="/theme.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <style>
+/* ══ THEME VARIABLES ══ */
+:root, [data-theme="classic"]  { --accent:#7EB6FF; --accent-dim:rgba(126,182,255,.15); --accent-glow:rgba(126,182,255,.4); --gradient:linear-gradient(135deg,#7EB6FF,#0010BD); --cursor-bg:#7EB6FF; --cursor-hover:rgba(126,182,255,.55); }
+[data-theme="exosware"] { --accent:#00FFB3; --accent-dim:rgba(0,255,179,.15); --accent-glow:rgba(0,255,179,.4); --gradient:linear-gradient(135deg,#00FFB3,#0066FF); --cursor-bg:#00FFB3; --cursor-hover:rgba(0,255,179,.55); }
+[data-theme="fallen"]   { --accent:#B0B0B0; --accent-dim:rgba(176,176,176,.15); --accent-glow:rgba(176,176,176,.35); --gradient:linear-gradient(135deg,#C8C8C8,#555); --cursor-bg:#B0B0B0; --cursor-hover:rgba(176,176,176,.5); }
+[data-theme="svintus"]  { --accent:#FF6B35; --accent-dim:rgba(255,107,53,.15); --accent-glow:rgba(255,107,53,.4); --gradient:linear-gradient(135deg,#FF6B35,#CC2200); --cursor-bg:#FF6B35; --cursor-hover:rgba(255,107,53,.55); }
 /* ══════════════════════════════════════════
    BASE — точно как caketools
 ══════════════════════════════════════════ */
@@ -29,12 +35,12 @@ body {
 
 .custom-cursor {
   position: fixed; width: 12px; height: 12px;
-  background: #7EB6FF; border-radius: 50%;
+  background: var(--cursor-bg, #7EB6FF); border-radius: 50%;
   pointer-events: none; z-index: 99999;
-  transition: transform .15s ease;
+  transition: transform .15s ease, background .3s ease;
   transform: translate(-50%,-50%);
 }
-.custom-cursor.hover { transform: translate(-50%,-50%) scale(2.2); background: rgba(126,182,255,.55); }
+.custom-cursor.hover { transform: translate(-50%,-50%) scale(2.2); background: var(--cursor-hover, rgba(126,182,255,.55)); }
 a,button,input,select,textarea,label { cursor: none !important; }
 
 #particles-canvas {
@@ -650,6 +656,7 @@ input[type=range] {
         <button class="btn btn-secondary" id="bc-btn" onclick="openBroadcast()" style="border-color:rgba(126,182,255,.4);color:#7EB6FF;">📡 Все боты</button>
         <button class="btn btn-secondary" onclick="exportBots()" style="border-color:rgba(57,217,138,.4);color:#39d98a;">📤 Экспорт</button>
         <button class="btn btn-secondary" onclick="openImportModal()" style="border-color:rgba(245,184,79,.4);color:#f5b84f;">📥 Импорт</button>
+        <button class="btn btn-danger" onclick="doDeleteAll()" style="border-color:rgba(255,71,87,.4);">🗑️ Удалить всех</button>
         <!-- Быстрый переключатель темы -->
         <div class="nav-theme-dots" title="Тема">
           <button class="theme-chip theme-dot" data-theme-option="classic"  title="Original (Синий)"></button>
@@ -916,26 +923,8 @@ input[type=range] {
 })();
 
 /* ════════════════════════════════════════════
-   CUSTOM CURSOR
+   CUSTOM CURSOR — loaded from /cursor.js
 ════════════════════════════════════════════ */
-(function() {
-  const cur = document.querySelector('.custom-cursor');
-  document.addEventListener('mousemove', e => {
-    cur.style.left = e.clientX+'px';
-    cur.style.top  = e.clientY+'px';
-  });
-  const obs = new MutationObserver(() => bindHover());
-  obs.observe(document.body, {childList:true, subtree:true});
-  function bindHover() {
-    document.querySelectorAll('a,button,.btn,input,select,label').forEach(el => {
-      if (el.dataset.cursorBound === '1') return;
-      el.dataset.cursorBound = '1';
-      el.addEventListener('mouseenter', () => cur.classList.add('hover'));
-      el.addEventListener('mouseleave', () => cur.classList.remove('hover'));
-    });
-  }
-  bindHover();
-})();
 
 /* ════════════════════════════════════════════
    RIPPLE
@@ -1384,6 +1373,14 @@ async function quickDel(id, e) {
   catch(err) { Toast.error(err.message); }
 }
 
+async function doDeleteAll() {
+  if (!confirm('Удалить ВСЕХ ботов?')) return;
+  try {
+    await api('/api/bots', {method:'DELETE'});
+    Toast.success('Все боты удалены', '🗑️');
+  } catch(e) { Toast.error(e.message); }
+}
+
 /* ════════════════════════════════════════════
    CREATE BOTS (batch)
 ════════════════════════════════════════════ */
@@ -1803,7 +1800,10 @@ async function doImport() {
       body: JSON.stringify({
         host, port: el('imp-port').value || '25565',
         version: el('imp-version').value || '1.20.1',
-        bots: botList
+        bots: botList,
+        waveSize: parseInt(el('imp-wave').value) || 5,
+        waveDelay: parseInt(el('imp-wave-delay').value) || 4000,
+        proxyList: (el('imp-proxy').value || '').split('\n').map(s=>s.trim()).filter(Boolean),
       })
     });
     Toast.success(`Загружено ${r.created} ботов`, '📥');
@@ -1814,6 +1814,8 @@ async function doImport() {
 }
 
 </script>
+<script src="/cursor.js"></script>
+<!-- theme.js (loaded in <head>) handles all theme switching -->
 
 <!-- Broadcast console overlay -->
 <div class="bc-overlay" id="bc-overlay" onclick="if(event.target===this)closeBroadcast()">
@@ -1873,6 +1875,18 @@ async function doImport() {
       <div class="field">
         <label>Пароль по умолчанию (если не в файле)</label>
         <input class="field-input" id="imp-pass" placeholder="оставьте пустым = пароль = ник">
+      </div>
+      <div class="field">
+        <label>Ботов одновременно (размер волны)</label>
+        <input class="field-input" id="imp-wave" type="number" value="5" min="1" max="50">
+      </div>
+      <div class="field">
+        <label>Задержка между волнами (мс)</label>
+        <input class="field-input" id="imp-wave-delay" type="number" value="4000" min="500" max="60000">
+      </div>
+      <div class="field full">
+        <label>Прокси (необязательно) — формат: <code style="color:#7EB6FF">socks5://user:pass@host:port</code> или <code style="color:#7EB6FF">host:port</code> (один на строку или один для всех)</label>
+        <textarea class="field-input" id="imp-proxy" rows="2" placeholder="socks5://127.0.0.1:1080&#10;(необязательно)"></textarea>
       </div>
       <div class="field full">
         <label>Файл (.txt)</label>

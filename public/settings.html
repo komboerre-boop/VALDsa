@@ -378,22 +378,7 @@
       } catch(e) { setStatus('Ошибка загрузки настроек', 'err'); }
     })();
 
-    // Кастомный курсор
-    const cur = document.querySelector('.custom-cursor');
-    document.addEventListener('mousemove', e => {
-      cur.style.left = e.clientX + 'px';
-      cur.style.top  = e.clientY + 'px';
-    });
-    function bindHover() {
-      document.querySelectorAll('a,button,.btn,input,select,label,textarea').forEach(el => {
-        if (el.dataset.cursorBound === '1') return;
-        el.dataset.cursorBound = '1';
-        el.addEventListener('mouseenter', () => cur.classList.add('hover'));
-        el.addEventListener('mouseleave', () => cur.classList.remove('hover'));
-      });
-    }
-    bindHover();
-    new MutationObserver(bindHover).observe(document.body, { childList: true, subtree: true });
   </script>
+  <script src="/cursor.js"></script>
 </body>
 </html>

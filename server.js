@@ -12,6 +12,9 @@ const path       = require('path');
 const crypto     = require('crypto');
 const fs         = require('fs');
 
+let SocksClient = null;
+try { SocksClient = require('socks').SocksClient; } catch {}
+
 const app    = express();
 const server = http.createServer(app);
 const io     = new Server(server);
@@ -101,6 +104,9 @@ let   cpuSnapshot = { ts: process.hrtime.bigint(), usage: process.cpuUsage() };
 let   currentCpu  = 0;
 
 const sleep   = ms => new Promise(r => setTimeout(r, ms));
+function jitter(ms, pct = 0.25) {
+    return Math.max(50, Math.round(ms * (1 - pct + Math.random() * pct * 2)));
+}
 const navWindowHandled = new Set();
 
 // ── Безопасный чат (не флудим — ждём между командами) ──
@@ -973,7 +979,7 @@ function markAuthenticated(id) {
         }, 800);
     }
 }
-function scheduleAuth(id, mode, prompt = '', delay = DEFAULT_AUTH_DELAY_MS) {
+function scheduleAuth(id, mode, prompt = '', delay = jitter(DEFAULT_AUTH_DELAY_MS)) {
     const b = bots.get(id);
     if (!b?.mc || b.status === 'banned' || b.config.autoAuth === false) return;
     if (mode === 'login' && b.auth.authenticated) return;
@@ -1008,6 +1014,37 @@ function createBot(id, config, opts = {}) {
     setStage(id, STAGE.CONNECTING);
     addLog(id, LOG.SYSTEM, `Подключаюсь → ${config.host}:${config.port} как ${config.username}`);
 
+    const proxyUrl = config.proxy ? config.proxy.trim() : null;
+    let connectOpt = {};
+    if (proxyUrl && SocksClient) {
+        connectOpt.connect = (client) => {
+            let pHost, pPort = 1080, pType = 5, pUser, pPass;
+            try {
+                let u = proxyUrl;
+                if (u.includes('://')) {
+                    const url = new URL(u);
+                    pType  = url.protocol.startsWith('socks4') ? 4 : 5;
+                    pHost  = url.hostname;
+                    pPort  = parseInt(url.port) || 1080;
+                    pUser  = url.username || undefined;
+                    pPass  = url.password || undefined;
+                } else {
+                    const [h, p] = u.split(':');
+                    pHost = h; pPort = parseInt(p) || 1080;
+                }
+            } catch { pHost = proxyUrl.split(':')[0]; pPort = parseInt(proxyUrl.split(':')[1]) || 1080; }
+            SocksClient.createConnection({
+                proxy: { host: pHost, port: pPort, type: pType, userId: pUser, password: pPass },
+                command: 'connect',
+                destination: { host: config.host, port: parseInt(config.port) || 25565 },
+            }, (err, info) => {
+                if (err) { client.emit('error', err); return; }
+                client.setSocket(info.socket);
+                client.emit('connect');
+            });
+        };
+    }
+
     let mc;
     try {
         mc = mineflayer.createBot({
@@ -1021,6 +1058,8 @@ function createBot(id, config, opts = {}) {
             physicsEnabled: false,
             disableChatSigning: true,   // без подписи чата (1.19+)
             viewDistance: LOW_MEMORY_VIEW_DISTANCE,
+            keepAlive: true,
+            ...connectOpt,
         });
         // Заглушаем встроенный логгер mineflayer чтобы не спамил в консоль
         try { mc.logger = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} }; } catch {}
@@ -1075,6 +1114,23 @@ function createBot(id, config, opts = {}) {
         } catch {
             try { mc._client.write('settings', settingsBase); } catch {}
         }
+
+        // Споофим бренд клиента как "vanilla" — защита от детекта mineflayer
+        try {
+            const brandBuf = Buffer.alloc(1 + 7);
+            brandBuf.writeUInt8(7, 0);
+            brandBuf.write('vanilla', 1, 'utf8');
+            mc._client.write('custom_payload', {
+                channel: 'minecraft:brand',
+                data: brandBuf,
+            });
+        } catch {}
+        // Регистрируем стандартные плагин-каналы ванильного клиента
+        try {
+            const channels = ['minecraft:brand','minecraft:debug/paths','minecraft:debug/neighbors_update'];
+            const regBuf = Buffer.from(channels.join('\0'));
+            mc._client.write('custom_payload', { channel: 'minecraft:register', data: regBuf });
+        } catch {}
     });
 
     mc.on('spawn', () => {
@@ -1424,7 +1480,7 @@ async function doOwnerSetup(id) {
         if (resp) addLog(id, LOG.SUCCESS, `RG ответ: ${resp}`);
         else      addLog(id, LOG.WARN,    `RG: нет ответа для ${target.config.username} — продолжаю`);
 
-        await sleep(300);
+        await sleep(jitter(300));
 
         // Помечаем как готового
         target.kitFarmReady = true;
@@ -1532,7 +1588,7 @@ async function doKitFarm(id) {
         mc.chat('/warp mamka');
         const warped = await waitWarp(mc, 9000);
         if (!warped) addLog(id, LOG.WARN, '/warp mamka — телепорт не подтверждён, продолжаем');
-        await sleep(300);
+        await sleep(jitter(300));
 
         // 2. Берём киты с повтором при кулдауне (до 3 попыток)
         for (const kit of KIT_FARM_KITS) {
@@ -1553,11 +1609,11 @@ async function doKitFarm(id) {
                     break; // успешно или другой ответ
                 }
             }
-            await sleep(300);
+            await sleep(jitter(300));
         }
 
         // 3. Ищем ближайший сундук и выкладываем предметы
-        await sleep(300);
+        await sleep(jitter(300));
         const chestPos = findNearestChest(mc);
         if (!chestPos) {
             addLog(id, LOG.WARN, 'Сундук не найден рядом (радиус 10) — пропускаю выгрузку');
@@ -1802,7 +1858,7 @@ async function doOpenCase(id) {
         });
         if (resultWin) {
             addLog(id, LOG.SUCCESS, `Кейс открыт ✓ (${resultWin.title})`);
-            await sleep(300);
+            await sleep(jitter(300));
             try { mc.closeWindow(resultWin); } catch {}
         } else {
             addLog(id, LOG.SUCCESS, 'Кейс открыт ✓');
@@ -2223,13 +2279,15 @@ app.post('/api/bots/:id/shop/scan', (req, res) => {
 
 // ── Импорт ботов из TXT ──────────────────────
 app.post('/api/bots/import', (req, res) => {
-    const { host, port, version, bots: botList, waveSize, waveDelay, ...rest } = req.body;
+    const { host, port, version, bots: botList, waveSize, waveDelay, proxyList: rawProxyList, ...rest } = req.body;
     if (!String(host||'').trim()) return res.status(400).json({ error: 'host обязателен' });
     if (!Array.isArray(botList) || !botList.length) return res.status(400).json({ error: 'bots[] обязателен' });
+    const proxyList = Array.isArray(rawProxyList) ? rawProxyList.filter(Boolean) : [];
     const created = [];
-    for (const entry of botList.slice(0, 500)) {
+    botList.slice(0, 500).forEach((entry, idx) => {
         const username = makeUniqueUsername(entry.username);
-        if (!username) continue;
+        if (!username) return;
+        const proxy = proxyList.length ? proxyList[idx % proxyList.length] : null;
         const config = {
             host: String(host).trim(),
             username,
@@ -2244,12 +2302,13 @@ app.post('/api/bots/import', (req, res) => {
             autoReconnect:rest.autoReconnect !== false,
             griefWorld:   parseInt(rest.griefWorld) || 1,
             kitFarm: false, kitFarmRegionOwner: null, kitFarmRegion: null,
+            proxy: proxy || null,
         };
         const id = nextId++;
         bots.set(id, buildBotState(id, config, 'connecting', STAGE.CONNECTING));
         io.emit('bot:created', { id, config, status:'connecting', stage:STAGE.CONNECTING, logs:[], relics: createRelicsState(), riliky: null });
         created.push(id);
-    }
+    });
     broadcastStats();
     const schedule = scheduleBatchStart(created, waveSize, waveDelay);
     res.json({ ok: true, created: created.length, ...schedule });

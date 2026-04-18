@@ -1,3 +1,36 @@
+:root, [data-theme="classic"] {
+  --accent:     #7EB6FF;
+  --accent-dim: rgba(126,182,255,.15);
+  --accent-glow:rgba(126,182,255,.4);
+  --gradient:   linear-gradient(135deg,#7EB6FF,#0010BD);
+  --cursor-bg:  #7EB6FF;
+  --cursor-hover: rgba(126,182,255,.55);
+}
+[data-theme="exosware"] {
+  --accent:     #00FFB3;
+  --accent-dim: rgba(0,255,179,.15);
+  --accent-glow:rgba(0,255,179,.4);
+  --gradient:   linear-gradient(135deg,#00FFB3,#0066FF);
+  --cursor-bg:  #00FFB3;
+  --cursor-hover: rgba(0,255,179,.55);
+}
+[data-theme="fallen"] {
+  --accent:     #B0B0B0;
+  --accent-dim: rgba(176,176,176,.15);
+  --accent-glow:rgba(176,176,176,.35);
+  --gradient:   linear-gradient(135deg,#C8C8C8,#555);
+  --cursor-bg:  #B0B0B0;
+  --cursor-hover: rgba(176,176,176,.5);
+}
+[data-theme="svintus"] {
+  --accent:     #FF6B35;
+  --accent-dim: rgba(255,107,53,.15);
+  --accent-glow:rgba(255,107,53,.4);
+  --gradient:   linear-gradient(135deg,#FF6B35,#CC2200);
+  --cursor-bg:  #FF6B35;
+  --cursor-hover: rgba(255,107,53,.55);
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -26,7 +59,7 @@ body {
   position: fixed;
   width: 12px;
   height: 12px;
-  background: #7EB6FF;
+  background: var(--cursor-bg, #7EB6FF);
   border-radius: 50%;
   pointer-events: none;
   z-index: 99999;
@@ -36,7 +69,7 @@ body {
 
 .custom-cursor.hover {
   transform: translate(-50%, -50%) scale(2);
-  background: rgba(126, 182, 255, 0.6);
+  background: var(--cursor-hover, rgba(126,182,255,.55));
 }
 
 a, button, input, textarea, select {
@@ -93,7 +126,7 @@ a, button, input, textarea, select {
 .logo {
   font-size: 1.5rem;
   font-weight: 600;
-  background: linear-gradient(to right, #7EB6FF 0%, #0010BD 100%);
+  background: var(--gradient, linear-gradient(to right,#7EB6FF,#0010BD));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
