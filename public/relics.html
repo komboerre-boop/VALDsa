@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Лидерборд риликов</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    body { overflow-x: hidden; }
+    .overview-page { padding: 0 0 2.5rem; }
+    .overview-grid {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.25rem;
+    }
+    .metric-card, .panel-card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(126,182,255,0.14);
+      border-radius: 1rem;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 14px 40px rgba(0,0,0,0.28);
+    }
+    .metric-card {
+      padding: 1.1rem 1.2rem;
+      min-height: 124px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .metric-label {
+      color: #9aa6ba;
+      font-size: 0.68rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .metric-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      line-height: 1.1;
+      word-break: break-word;
+    }
+    .metric-sub {
+      color: #c7d6eb;
+      font-size: 0.72rem;
+      line-height: 1.5;
+    }
+    .page-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.6fr) minmax(320px, 0.9fr);
+      gap: 1rem;
+      align-items: start;
+    }
+    .panel-card { padding: 1.15rem; }
+    .panel-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+    .panel-title {
+      font-size: 1rem;
+      font-weight: 700;
+      line-height: 1.3;
+    }
+    .panel-sub {
+      color: #93a1b5;
+      font-size: 0.7rem;
+      line-height: 1.6;
+      margin-top: 0.3rem;
+    }
+    .status-pill {
+      padding: 0.45rem 0.75rem;
+      border-radius: 999px;
+      border: 1px solid rgba(126,182,255,0.18);
+      background: rgba(126,182,255,0.08);
+      color: #cfe0f7;
+      font-size: 0.68rem;
+      white-space: nowrap;
+    }
+    .table-wrap {
+      overflow: auto;
+      border-radius: 0.9rem;
+      border: 1px solid rgba(126,182,255,0.12);
+      background: rgba(5,7,14,0.45);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 760px;
+    }
+    thead th {
+      text-align: left;
+      font-size: 0.66rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #8e9db2;
+      padding: 0.85rem 0.9rem;
+      background: rgba(255,255,255,0.03);
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    tbody td {
+      padding: 0.9rem;
+      font-size: 0.74rem;
+      color: #dde7f3;
+      border-top: 1px solid rgba(126,182,255,0.08);
+      vertical-align: top;
+    }
+    tbody tr:hover { background: rgba(126,182,255,0.05); }
+    .rank-badge {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border-radius: 0.8rem;
+      background: rgba(126,182,255,0.1);
+      border: 1px solid rgba(126,182,255,0.18);
+      color: #7EB6FF;
+      font-weight: 700;
+    }
+    .bot-cell strong {
+      display: block;
+      font-size: 0.78rem;
+      margin-bottom: 0.25rem;
+    }
+    .bot-cell span {
+      color: #8b9bb0;
+      font-size: 0.67rem;
+      line-height: 1.5;
+    }
+    .relic-value {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #8dc8ff;
+    }
+    .badge-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+    }
+    .mini-pill {
+      padding: 0.28rem 0.6rem;
+      border-radius: 999px;
+      font-size: 0.64rem;
+      border: 1px solid rgba(126,182,255,0.14);
+      background: rgba(255,255,255,0.04);
+      color: #c9d6ea;
+    }
+    .mini-pill.good {
+      color: #91e2b8;
+      border-color: rgba(57,217,138,0.22);
+      background: rgba(57,217,138,0.08);
+    }
+    .mini-pill.warn {
+      color: #ffd995;
+      border-color: rgba(245,184,79,0.22);
+      background: rgba(245,184,79,0.08);
+    }
+    .side-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .stat-list, .settings-list {
+      display: grid;
+      gap: 0.7rem;
+    }
+    .stat-item, .setting-item {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.75rem 0.85rem;
+      border-radius: 0.85rem;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(126,182,255,0.1);
+      font-size: 0.72rem;
+      color: #dbe6f8;
+    }
+    .stat-item span:first-child, .setting-item span:first-child { color: #8d9cb1; }
+    .view-settings {
+      display: grid;
+      gap: 0.9rem;
+    }
+    .field {
+      display: grid;
+      gap: 0.35rem;
+    }
+    .field label {
+      color: #94a4ba;
+      font-size: 0.67rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .field select {
+      width: 100%;
+      padding: 0.78rem 0.9rem;
+      border-radius: 0.8rem;
+      border: 1px solid rgba(126,182,255,0.18);
+      background: rgba(255,255,255,0.05);
+      color: #fff;
+      font-family: inherit;
+      font-size: 0.74rem;
+      outline: none;
+    }
+    .toggle {
+      display: flex;
+      align-items: center;
+      gap: 0.7rem;
+      padding: 0.82rem 0.9rem;
+      border-radius: 0.85rem;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(126,182,255,0.12);
+      font-size: 0.74rem;
+      color: #dbe6f8;
+    }
+    .toggle input {
+      width: 16px;
+      height: 16px;
+      accent-color: #7EB6FF;
+      flex-shrink: 0;
+    }
+    .empty-state {
+      padding: 2rem;
+      text-align: center;
+      color: #93a1b5;
+      font-size: 0.76rem;
+      line-height: 1.8;
+    }
+    @media (max-width: 1260px) {
+      .overview-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .page-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 780px) {
+      .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .container { padding: 0 1rem; }
+      .panel-card { padding: 1rem; }
+      .metric-card { min-height: 110px; }
+      .metric-value { font-size: 1.2rem; }
+      table { min-width: 620px; }
+    }
+  </style>
+  <link rel="stylesheet" href="/theme.css">
+</head>
+<body>
+  <div class="custom-cursor"></div>
+  <canvas id="particles-canvas"></canvas>
+
+  <div class="container">
+    <header class="header">
+      <nav class="nav">
+        <a href="/relics.html" class="logo">CakeWorld Riliki Leaderboard</a>
+        <ul class="nav-links">
+          <li><a href="/" class="back-link">Панель</a></li>
+        </ul>
+      </nav>
+    </header>
+
+    <main class="overview-page">
+      <section class="overview-grid" id="metrics"></section>
+
+      <section class="page-grid">
+        <div class="panel-card">
+          <div class="panel-head">
+            <div>
+              <div class="panel-title">Лидерборд по риликам</div>
+              <div class="panel-sub">Отдельная страница со сводкой по всем ботам: общий баланс, топ по риликам и свежесть данных из scoreboard.</div>
+            </div>
+            <div class="status-pill" id="leaderboard-hint">live socket</div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Бот</th>
+                  <th>Рилики</th>
+                  <th>Статус</th>
+                  <th>Свежесть</th>
+                  <th>Сервер</th>
+                </tr>
+              </thead>
+              <tbody id="leaderboard-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="side-stack">
+          <div class="panel-card">
+            <div class="panel-title">Статистика</div>
+            <div class="panel-sub">Сколько ботов реально отдают данные по скорборду и насколько они свежие.</div>
+            <div class="stat-list" id="stats-list"></div>
+          </div>
+
+          <div class="panel-card">
+            <div class="panel-title">Настройки ботов</div>
+            <div class="panel-sub">Сколько ботов сейчас работают с включёнными авто-режимами.</div>
+            <div class="settings-list" id="bot-settings-list"></div>
+          </div>
+
+          <div class="panel-card" id="view-settings">
+            <div class="panel-title">Фильтры и вид</div>
+            <div class="panel-sub">Локальные фильтры этой страницы и параметры отображения лидерборда. Сохраняются в браузере.</div>
+            <div class="view-settings">
+              <div class="field">
+                <label>Тема сайта</label>
+                <div class="theme-chip-row">
+                  <button class="theme-chip" type="button" data-theme-option="classic" aria-label="Переключить тему: Original">
+                    <span class="theme-chip-swatch" aria-hidden="true"></span>
+                    <span class="theme-chip-copy">
+                      <strong>Original</strong>
+                      <small>Синий</small>
+                    </span>
+                  </button>
+                  <button class="theme-chip" type="button" data-theme-option="exosware" aria-label="Переключить тему: ExosWare">
+                    <span class="theme-chip-swatch" aria-hidden="true"></span>
+                    <span class="theme-chip-copy">
+                      <strong>ExosWare</strong>
+                      <small>Неон</small>
+                    </span>
+                  </button>
+                  <button class="theme-chip" type="button" data-theme-option="fallen" aria-label="Переключить тему: Fallen">
+                    <span class="theme-chip-swatch" aria-hidden="true"></span>
+                    <span class="theme-chip-copy">
+                      <strong>Fallen</strong>
+                      <small>Графит</small>
+                    </span>
+                  </button>
+                  <button class="theme-chip" type="button" data-theme-option="svintus" aria-label="Переключить тему: Svintus">
+                    <span class="theme-chip-swatch" aria-hidden="true"></span>
+                    <span class="theme-chip-copy">
+                      <strong>Svintus</strong>
+                      <small>Жар</small>
+                    </span>
+                  </button>
+                </div>
+              </div>
+              <div class="field">
+                <label for="sort-by">Сортировка</label>
+                <select id="sort-by">
+                  <option value="relics">По риликам</option>
+                  <option value="name">По имени</option>
+                  <option value="updated">По свежести</option>
+                </select>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="show-offline" checked>
+                <span>Показывать оффлайн и banned ботов</span>
+              </label>
+              <label class="toggle">
+                <input type="checkbox" id="show-stale" checked>
+                <span>Показывать устаревшие значения</span>
+              </label>
+              <label class="toggle">
+                <input type="checkbox" id="hide-empty" checked>
+                <span>Скрывать ботов без найденных риликов</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/app.js"></script>
+  <script>
+    const socket = io();
+    const STORAGE_KEY = 'cakeworld_relics_view';
+    const state = {
+      summary: null,
+      view: loadView()
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+      bindControls();
+      loadSummary();
+      setInterval(refreshRelativeTimes, 1000);
+    });
+
+    socket.on('relics:summary', summary => {
+      state.summary = summary;
+      render();
+    });
+
+    async function loadSummary() {
+      try {
+        state.summary = await fetchJson('/api/relics');
+        render();
+      } catch (error) {
+        if (window.Toast) Toast.error(error.message, 'Не удалось загрузить рилики');
+      }
+    }
+
+    function bindControls() {
+      document.getElementById('sort-by').value = state.view.sortBy;
+      document.getElementById('show-offline').checked = state.view.showOffline;
+      document.getElementById('show-stale').checked = state.view.showStale;
+      document.getElementById('hide-empty').checked = state.view.hideEmpty;
+
+      ['sort-by', 'show-offline', 'show-stale', 'hide-empty'].forEach(id => {
+        document.getElementById(id).addEventListener('change', () => {
+          state.view = {
+            sortBy: document.getElementById('sort-by').value,
+            showOffline: document.getElementById('show-offline').checked,
+            showStale: document.getElementById('show-stale').checked,
+            hideEmpty: document.getElementById('hide-empty').checked
+          };
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state.view));
+          render();
+        });
+      });
+    }
+
+    function loadView() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+        return {
+          sortBy: saved.sortBy || 'relics',
+          showOffline: saved.showOffline !== false,
+          showStale: saved.showStale !== false,
+          hideEmpty: saved.hideEmpty !== false
+        };
+      } catch {
+        return {
+          sortBy: 'relics',
+          showOffline: true,
+          showStale: true,
+          hideEmpty: true
+        };
+      }
+    }
+
+    function render() {
+      if (!state.summary) return;
+      renderMetrics();
+      renderStats();
+      renderBotSettings();
+      renderLeaderboard();
+      const hint = document.getElementById('leaderboard-hint');
+      hint.dataset.ts = state.summary.latestUpdatedAt || '';
+      hint.textContent = `обновлено ${fmtAge(state.summary.latestUpdatedAt)}`;
+    }
+
+    function renderMetrics() {
+      const summary = state.summary;
+      const metrics = [
+        {
+          label: 'Всего риликов',
+          value: fmtNum(summary.totalRelics),
+          sub: `по ${summary.botsWithRelics} ботам с данными`
+        },
+        {
+          label: 'Онлайн',
+          value: fmtNum(summary.onlineBots),
+          sub: `из ${summary.botsTracked} отслеживаемых`
+        },
+        {
+          label: 'Среднее',
+          value: fmtNum(summary.averageRelics),
+          sub: 'среднее число риликов на одного бота'
+        },
+        {
+          label: 'Максимум',
+          value: fmtNum(summary.maxRelics),
+          sub: summary.topBot ? `${esc(summary.topBot.username)} держит топ` : 'топ ещё не найден'
+        },
+        {
+          label: 'Живые данные',
+          value: fmtNum(summary.liveRelicBots),
+          sub: `${summary.staleRelicBots} значений сейчас устаревшие`
+        },
+        {
+          label: 'Последний апдейт',
+          value: summary.latestUpdatedAt
+            ? `<span class="js-age" data-ts="${summary.latestUpdatedAt}">${fmtAge(summary.latestUpdatedAt)}</span>`
+            : '—',
+          sub: 'sidebar-scoreboard, live socket'
+        }
+      ];
+
+      document.getElementById('metrics').innerHTML = metrics.map(item => `
+        <article class="metric-card">
+          <div class="metric-label">${item.label}</div>
+          <div class="metric-value gradient-text">${item.value}</div>
+          <div class="metric-sub">${item.sub}</div>
+        </article>
+      `).join('');
+    }
+
+    function renderStats() {
+      const summary = state.summary;
+      const stats = [
+        ['Ботов с риликами', `${fmtNum(summary.botsWithRelics)} / ${fmtNum(summary.botsTracked)}`],
+        ['Живые значения', fmtNum(summary.liveRelicBots)],
+        ['Устаревшие значения', fmtNum(summary.staleRelicBots)],
+        ['Топ-бот', summary.topBot ? `${summary.topBot.username} · ${fmtNum(summary.topBot.relics)}` : '—'],
+        ['Парсер', 'scoreboard + /рилики/i'],
+      ];
+      document.getElementById('stats-list').innerHTML = stats.map(([label, value]) => `
+        <div class="stat-item"><span>${label}</span><strong>${value}</strong></div>
+      `).join('');
+    }
+
+    function renderBotSettings() {
+      const total = Math.max(1, state.summary.botsTracked || 1);
+      const rows = [
+        ['AutoAuth', state.summary.settings.autoAuthOn, total],
+        ['AutoNav', state.summary.settings.autoNavOn, total],
+        ['AutoAFK', state.summary.settings.autoAfkOn, total],
+        ['AutoFree', state.summary.settings.autoFreeOn, total],
+        ['AutoReconnect', state.summary.settings.autoReconnectOn, total],
+      ];
+      document.getElementById('bot-settings-list').innerHTML = rows.map(([label, on, totalBots]) => `
+        <div class="setting-item">
+          <span>${label}</span>
+          <strong>${fmtNum(on)} / ${fmtNum(totalBots)}</strong>
+        </div>
+      `).join('');
+    }
+
+    function getVisibleLeaderboard() {
+      const list = [...(state.summary?.leaderboard || [])];
+      const filtered = list.filter(item => {
+        if (!state.view.showOffline && !['online', 'connecting'].includes(item.status)) return false;
+        if (!state.view.showStale && item.stale) return false;
+        if (state.view.hideEmpty && !Number.isFinite(item.relics)) return false;
+        return true;
+      });
+
+      filtered.sort((a, b) => {
+        if (state.view.sortBy === 'name') {
+          return a.username.localeCompare(b.username, 'ru');
+        }
+        if (state.view.sortBy === 'updated') {
+          return (b.updatedAt || 0) - (a.updatedAt || 0);
+        }
+        const av = a.relics ?? -1;
+        const bv = b.relics ?? -1;
+        if (bv !== av) return bv - av;
+        return a.username.localeCompare(b.username, 'ru');
+      });
+
+      return filtered;
+    }
+
+    function renderLeaderboard() {
+      const rows = getVisibleLeaderboard();
+      const body = document.getElementById('leaderboard-body');
+      if (!rows.length) {
+        body.innerHTML = `<tr><td colspan="6" class="empty-state">Под текущие фильтры никто не попал. Попробуй включить оффлайн или показать пустые значения.</td></tr>`;
+        return;
+      }
+
+      body.innerHTML = rows.map((item, index) => `
+        <tr>
+          <td><div class="rank-badge">${index + 1}</div></td>
+          <td class="bot-cell">
+            <strong><a href="/bot.html?id=${item.id}" style="color:inherit;text-decoration:none">${esc(item.username)}</a></strong>
+            <span>ID ${item.id} · ${esc(item.sidebarTitle || 'sidebar')}</span>
+            ${item.line ? `<span>${esc(item.line)}</span>` : ''}
+          </td>
+          <td>
+            <div class="relic-value">${Number.isFinite(item.relics) ? fmtNum(item.relics) : '—'}</div>
+          </td>
+          <td>
+            <div class="badge-row">
+              <span class="mini-pill ${item.status === 'online' ? 'good' : item.status === 'banned' ? 'warn' : ''}">${esc(item.stage || item.status)}</span>
+              ${item.live ? '<span class="mini-pill good">live</span>' : '<span class="mini-pill">cached</span>'}
+            </div>
+          </td>
+          <td>
+            <div class="js-age" data-ts="${item.updatedAt || ''}">${fmtAge(item.updatedAt)}</div>
+            ${item.stale ? '<div class="panel-sub" style="margin-top:.15rem">значение устарело</div>' : ''}
+          </td>
+          <td>${esc(item.host)}</td>
+        </tr>
+      `).join('');
+      refreshRelativeTimes();
+    }
+
+    function fmtNum(value) {
+      return Number.isFinite(value) ? new Intl.NumberFormat('ru-RU').format(value) : '—';
+    }
+
+    function fmtAge(ts) {
+      if (!ts) return '—';
+      const diff = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+      if (diff < 5) return 'только что';
+      if (diff < 60) return `${diff}с назад`;
+      if (diff < 3600) return `${Math.floor(diff / 60)}м назад`;
+      return `${Math.floor(diff / 3600)}ч назад`;
+    }
+
+    function refreshRelativeTimes() {
+      document.querySelectorAll('.js-age').forEach(node => {
+        const ts = Number(node.dataset.ts || 0);
+        node.textContent = fmtAge(ts);
+      });
+      const hint = document.getElementById('leaderboard-hint');
+      if (hint) {
+        const ts = Number(hint.dataset.ts || 0);
+        hint.textContent = `обновлено ${fmtAge(ts)}`;
+      }
+    }
+
+    function esc(value) {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    async function fetchJson(url, options) {
+      const response = await fetch(url, options);
+      let payload = {};
+      try {
+        payload = await response.json();
+      } catch {
+        payload = {};
+      }
+      if (!response.ok) throw new Error(payload.error || 'Ошибка загрузки');
+      return payload;
+    }
+  </script>
+</body>
+</html>
