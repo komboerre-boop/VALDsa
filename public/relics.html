@@ -20,11 +20,11 @@
       margin-bottom: 1.25rem;
     }
     .metric-card, .panel-card {
-      background: rgba(255,255,255,0.04);
-      border: 1px solid rgba(126,182,255,0.14);
+      background: var(--c-surface2, rgba(255,255,255,0.04));
+      border: 1px solid var(--c-brd, rgba(126,182,255,0.14));
       border-radius: 1rem;
-      backdrop-filter: blur(16px);
-      box-shadow: 0 14px 40px rgba(0,0,0,0.28);
+      backdrop-filter: var(--c-blur, blur(16px));
+      box-shadow: var(--c-shadow, 0 14px 40px rgba(0,0,0,0.28));
     }
     .metric-card {
       padding: 1.1rem 1.2rem;
@@ -78,8 +78,8 @@
     .status-pill {
       padding: 0.45rem 0.75rem;
       border-radius: 999px;
-      border: 1px solid rgba(126,182,255,0.18);
-      background: rgba(126,182,255,0.08);
+      border: 1px solid var(--c-brd, rgba(126,182,255,0.18));
+      background: var(--c-act, rgba(126,182,255,0.08));
       color: #cfe0f7;
       font-size: 0.68rem;
       white-space: nowrap;
@@ -87,7 +87,7 @@
     .table-wrap {
       overflow: auto;
       border-radius: 0.9rem;
-      border: 1px solid rgba(126,182,255,0.12);
+      border: 1px solid var(--c-brd2, rgba(126,182,255,0.12));
       background: rgba(5,7,14,0.45);
     }
     table {
@@ -111,19 +111,19 @@
       padding: 0.9rem;
       font-size: 0.74rem;
       color: #dde7f3;
-      border-top: 1px solid rgba(126,182,255,0.08);
+      border-top: 1px solid var(--c-brd3, rgba(126,182,255,0.08));
       vertical-align: top;
     }
-    tbody tr:hover { background: rgba(126,182,255,0.05); }
+    tbody tr:hover { background: var(--c-surface2, rgba(126,182,255,0.05)); }
     .rank-badge {
       width: 34px;
       height: 34px;
       display: grid;
       place-items: center;
       border-radius: 0.8rem;
-      background: rgba(126,182,255,0.1);
-      border: 1px solid rgba(126,182,255,0.18);
-      color: #7EB6FF;
+      background: var(--c-act, rgba(126,182,255,0.1));
+      border: 1px solid var(--c-brd, rgba(126,182,255,0.18));
+      color: var(--accent, #7EB6FF);
       font-weight: 700;
     }
     .bot-cell strong {
@@ -139,7 +139,7 @@
     .relic-value {
       font-size: 1rem;
       font-weight: 700;
-      color: #8dc8ff;
+      color: var(--accent, #8dc8ff);
     }
     .badge-row {
       display: flex;
@@ -150,8 +150,8 @@
       padding: 0.28rem 0.6rem;
       border-radius: 999px;
       font-size: 0.64rem;
-      border: 1px solid rgba(126,182,255,0.14);
-      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--c-brd2, rgba(126,182,255,0.14));
+      background: var(--c-surface, rgba(255,255,255,0.04));
       color: #c9d6ea;
     }
     .mini-pill.good {
@@ -179,8 +179,8 @@
       gap: 1rem;
       padding: 0.75rem 0.85rem;
       border-radius: 0.85rem;
-      background: rgba(255,255,255,0.03);
-      border: 1px solid rgba(126,182,255,0.1);
+      background: var(--c-surface, rgba(255,255,255,0.03));
+      border: 1px solid var(--c-brd2, rgba(126,182,255,0.1));
       font-size: 0.72rem;
       color: #dbe6f8;
     }
@@ -203,8 +203,8 @@
       width: 100%;
       padding: 0.78rem 0.9rem;
       border-radius: 0.8rem;
-      border: 1px solid rgba(126,182,255,0.18);
-      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--c-brd, rgba(126,182,255,0.18));
+      background: var(--c-input, rgba(255,255,255,0.05));
       color: #fff;
       font-family: inherit;
       font-size: 0.74rem;
@@ -216,15 +216,15 @@
       gap: 0.7rem;
       padding: 0.82rem 0.9rem;
       border-radius: 0.85rem;
-      background: rgba(255,255,255,0.03);
-      border: 1px solid rgba(126,182,255,0.12);
+      background: var(--c-surface, rgba(255,255,255,0.03));
+      border: 1px solid var(--c-brd2, rgba(126,182,255,0.12));
       font-size: 0.74rem;
       color: #dbe6f8;
     }
     .toggle input {
       width: 16px;
       height: 16px;
-      accent-color: #7EB6FF;
+      accent-color: var(--accent, #7EB6FF);
       flex-shrink: 0;
     }
     .empty-state {

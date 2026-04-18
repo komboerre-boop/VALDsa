@@ -75,7 +75,7 @@
       transition: border-color .15s, background .15s;
     }
     .theme-chip:hover { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.25); }
-    .theme-chip.active { border-color: var(--accent, #7EB6FF); background: rgba(126,182,255,.1); color: #fff; }
+    .theme-chip.active { border-color: var(--accent, #7EB6FF); background: var(--accent-dim, rgba(126,182,255,.1)); color: #fff; }
     .theme-chip-swatch {
       width: 14px; height: 14px; border-radius: 50%;
       border: 1px solid rgba(255,255,255,.2);
@@ -146,6 +146,12 @@
         </button>
         <button class="theme-chip" type="button" data-theme-option="svintus">
           <span class="theme-chip-swatch"></span> Svintus <small style="color:#888;font-size:.7rem">Жар</small>
+        </button>
+        <button class="theme-chip" type="button" data-theme-option="aurora">
+          <span class="theme-chip-swatch" style="background:linear-gradient(135deg,#A855F7,#06B6D4);"></span> Aurora <small style="color:#888;font-size:.7rem">Аврора</small>
+        </button>
+        <button class="theme-chip" type="button" data-theme-option="phantom">
+          <span class="theme-chip-swatch" style="background:rgba(255,255,255,.25);border:1px solid rgba(255,255,255,.4);"></span> Phantom <small style="color:#888;font-size:.7rem">Призрак</small>
         </button>
       </div>
     </div>

@@ -1,10 +1,12 @@
 (() => {
   const STORAGE_KEY = 'cakeworld_theme';
   const THEMES = [
-    { id: 'classic', label: 'Original', note: 'Синий' },
-    { id: 'exosware', label: 'ExosWare', note: 'Неон' },
-    { id: 'fallen', label: 'Fallen', note: 'Графит' },
-    { id: 'svintus', label: 'Svintus', note: 'Жар' }
+    { id: 'classic',  label: 'Classic',  note: 'Синий'   },
+    { id: 'exosware', label: 'ExosWare', note: 'Неон'    },
+    { id: 'fallen',   label: 'Fallen',   note: 'Матовый' },
+    { id: 'svintus',  label: 'Svintus',  note: 'Жар'     },
+    { id: 'aurora',   label: 'Aurora',   note: 'Аврора'  },
+    { id: 'phantom',  label: 'Phantom',  note: 'Призрак' },
   ];
 
   function resolveTheme(themeId) {
