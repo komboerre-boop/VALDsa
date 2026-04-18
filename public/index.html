@@ -94,7 +94,21 @@ a,button,input,select,textarea,label { cursor: none !important; }
 .sdot.y  { background: #f5b84f; }
 .sdot.bl { background: #7EB6FF; }
 
-.nav-btns { display: flex; gap: .75rem; }
+.nav-btns { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+
+/* Быстрый переключатель темы в навбаре */
+.nav-theme-dots { display: flex; gap: .35rem; align-items: center; }
+.theme-dot {
+  width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid rgba(255,255,255,.2);
+  cursor: pointer; padding: 0; transition: transform .15s, border-color .15s;
+}
+.theme-dot:hover { transform: scale(1.25); border-color: rgba(255,255,255,.5); }
+.theme-dot.active { border-color: #fff; transform: scale(1.15); box-shadow: 0 0 6px rgba(255,255,255,.4); }
+.theme-dot[data-theme-option="classic"]  { background: #7EB6FF; }
+.theme-dot[data-theme-option="exosware"] { background: #00FFB3; }
+.theme-dot[data-theme-option="fallen"]   { background: #A0A0A0; }
+.theme-dot[data-theme-option="svintus"]  { background: #FF6B35; }
 
 /* ══════════════════════════════════════════
    BUTTONS — точно из caketools
@@ -593,13 +607,21 @@ input[type=range] {
 
       <div class="nav-btns">
         <button class="btn btn-primary" onclick="openModal()">+ Создать ботов</button>
-        <a class="btn btn-secondary" href="/relics.html">🏆 Лидерборд риликов</a>
+        <a class="btn btn-secondary" href="/relics.html">🏆 Лидерборд</a>
         <button class="btn btn-secondary" onclick="doReconnectAll()">↺ Реконнект всех</button>
         <button class="btn btn-secondary" onclick="doCaseAll()" style="border-color:rgba(57,217,138,.4);color:#39d98a;">📦 Кейс</button>
         <button class="btn btn-secondary" onclick="doPasxaAll()" style="border-color:rgba(245,184,79,.4);color:#f5b84f;">🐣 ПАСХА</button>
         <button class="btn btn-secondary" id="bc-btn" onclick="openBroadcast()" style="border-color:rgba(126,182,255,.4);color:#7EB6FF;">📡 Все боты</button>
         <button class="btn btn-secondary" onclick="exportBots()" style="border-color:rgba(57,217,138,.4);color:#39d98a;">📤 Экспорт</button>
         <button class="btn btn-secondary" onclick="openImportModal()" style="border-color:rgba(245,184,79,.4);color:#f5b84f;">📥 Импорт</button>
+        <!-- Быстрый переключатель темы -->
+        <div class="nav-theme-dots" title="Тема">
+          <button class="theme-chip theme-dot" data-theme-option="classic"  title="Original (Синий)"></button>
+          <button class="theme-chip theme-dot" data-theme-option="exosware" title="ExosWare (Неон)"></button>
+          <button class="theme-chip theme-dot" data-theme-option="fallen"   title="Fallen (Графит)"></button>
+          <button class="theme-chip theme-dot" data-theme-option="svintus"  title="Svintus (Жар)"></button>
+        </div>
+        <a class="btn btn-secondary" href="/settings.html" title="Настройки" style="padding:.35rem .7rem;">⚙️</a>
       </div>
     </nav>
   </header>

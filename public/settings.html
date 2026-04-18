@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Настройки — Bot Manager</title>
+  <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    body { overflow-x: hidden; }
+
+    .settings-page { max-width: 860px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+
+    .s-section {
+      background: rgba(255,255,255,.03);
+      border: 1px solid rgba(255,255,255,.07);
+      border-radius: 14px;
+      margin-bottom: 1.25rem;
+      overflow: hidden;
+    }
+    .s-section-head {
+      padding: .75rem 1.25rem;
+      background: rgba(255,255,255,.04);
+      border-bottom: 1px solid rgba(255,255,255,.06);
+      font-size: .82rem;
+      font-weight: 700;
+      color: var(--accent, #7EB6FF);
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+    }
+    .s-row {
+      display: grid;
+      grid-template-columns: 1fr 200px;
+      align-items: center;
+      gap: 1rem;
+      padding: .7rem 1.25rem;
+      border-bottom: 1px solid rgba(255,255,255,.04);
+    }
+    .s-row:last-child { border-bottom: none; }
+    .s-label { font-size: .82rem; color: #ddd; }
+    .s-label small { display: block; color: #888; font-size: .72rem; margin-top: .15rem; }
+    .s-ctrl { display: flex; align-items: center; gap: .5rem; }
+    .s-input {
+      width: 100%;
+      background: rgba(255,255,255,.07);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 8px;
+      color: #fff;
+      padding: .35rem .65rem;
+      font-size: .82rem;
+      outline: none;
+      transition: border-color .15s;
+    }
+    .s-input:focus { border-color: var(--accent, #7EB6FF); }
+    .s-unit { font-size: .75rem; color: #888; white-space: nowrap; }
+
+    /* Range slider */
+    .s-range-wrap { display: flex; flex-direction: column; gap: .3rem; }
+    .s-range { width: 100%; accent-color: var(--accent, #7EB6FF); cursor: pointer; }
+    .s-range-val { font-size: .75rem; color: var(--accent, #7EB6FF); text-align: right; font-weight: 600; }
+
+    /* Theme chips */
+    .theme-chip-row { display: flex; gap: .6rem; flex-wrap: wrap; padding: 1rem 1.25rem; }
+    .theme-chip {
+      display: flex; align-items: center; gap: .5rem;
+      padding: .45rem .9rem;
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 8px;
+      background: rgba(255,255,255,.04);
+      cursor: pointer; color: #ccc; font-size: .8rem;
+      transition: border-color .15s, background .15s;
+    }
+    .theme-chip:hover { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.25); }
+    .theme-chip.active { border-color: var(--accent, #7EB6FF); background: rgba(126,182,255,.1); color: #fff; }
+    .theme-chip-swatch {
+      width: 14px; height: 14px; border-radius: 50%;
+      border: 1px solid rgba(255,255,255,.2);
+    }
+    [data-theme-option="classic"]  .theme-chip-swatch { background: #7EB6FF; }
+    [data-theme-option="exosware"] .theme-chip-swatch { background: #00FFB3; }
+    [data-theme-option="fallen"]   .theme-chip-swatch { background: #A0A0A0; }
+    [data-theme-option="svintus"]  .theme-chip-swatch { background: #FF6B35; }
+
+    /* Rewards schedule textarea */
+    .s-textarea {
+      width: 100%;
+      background: rgba(255,255,255,.07);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 8px;
+      color: #fff;
+      padding: .45rem .65rem;
+      font-size: .78rem;
+      font-family: monospace;
+      outline: none;
+      resize: vertical;
+      min-height: 52px;
+    }
+    .s-textarea:focus { border-color: var(--accent, #7EB6FF); }
+
+    /* Action bar */
+    .settings-actions {
+      position: sticky; bottom: 0;
+      background: rgba(0,0,0,.7);
+      backdrop-filter: blur(16px);
+      border-top: 1px solid rgba(255,255,255,.08);
+      padding: .9rem 1.25rem;
+      display: flex; gap: .75rem; align-items: center;
+      margin: 0 -1rem;
+    }
+    .save-status { font-size: .78rem; color: #888; margin-left: auto; }
+    .save-status.ok  { color: #4ade80; }
+    .save-status.err { color: #f87171; }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <nav class="nav">
+      <a class="logo" href="/">← Bot Manager</a>
+      <div class="nav-btns">
+        <a class="btn btn-secondary" href="/relics.html" style="font-size:.8rem;padding:.35rem .9rem;">🏆 Лидерборд</a>
+      </div>
+    </nav>
+  </header>
+
+  <div class="settings-page">
+    <h2 style="font-size:1.1rem;margin:0 0 1.25rem;color:#fff;">⚙️ Настройки</h2>
+
+    <!-- Тема -->
+    <div class="s-section">
+      <div class="s-section-head">🎨 Тема интерфейса</div>
+      <div class="theme-chip-row">
+        <button class="theme-chip" type="button" data-theme-option="classic">
+          <span class="theme-chip-swatch"></span> Original <small style="color:#888;font-size:.7rem">Синий</small>
+        </button>
+        <button class="theme-chip" type="button" data-theme-option="exosware">
+          <span class="theme-chip-swatch"></span> ExosWare <small style="color:#888;font-size:.7rem">Неон</small>
+        </button>
+        <button class="theme-chip" type="button" data-theme-option="fallen">
+          <span class="theme-chip-swatch"></span> Fallen <small style="color:#888;font-size:.7rem">Графит</small>
+        </button>
+        <button class="theme-chip" type="button" data-theme-option="svintus">
+          <span class="theme-chip-swatch"></span> Svintus <small style="color:#888;font-size:.7rem">Жар</small>
+        </button>
+      </div>
+    </div>
+
+    <!-- Запуск ботов -->
+    <div class="s-section">
+      <div class="s-section-head">🤖 Запуск ботов</div>
+      <div class="s-row">
+        <div class="s-label">Задержка между ботами (старт)
+          <small>Пауза между каждым ботом внутри волны</small></div>
+        <div class="s-ctrl">
+          <input class="s-input" type="number" id="startStaggerMs" min="50" max="5000" step="50">
+          <span class="s-unit">мс</span>
+        </div>
+      </div>
+      <div class="s-row">
+        <div class="s-label">Размер волны по умолчанию
+          <small>Сколько ботов запускается в одной волне</small></div>
+        <div class="s-ctrl">
+          <input class="s-input" type="number" id="waveSize" min="1" max="50" step="1">
+          <span class="s-unit">ботов</span>
+        </div>
+      </div>
+      <div class="s-row">
+        <div class="s-label">Задержка между волнами
+          <small>Пауза перед следующей волной ботов</small></div>
+        <div class="s-ctrl">
+          <input class="s-input" type="number" id="waveDelayMs" min="500" max="60000" step="500">
+          <span class="s-unit">мс</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Чат -->
+    <div class="s-section">
+      <div class="s-section-head">💬 Чат и команды</div>
+      <div class="s-row">
+        <div class="s-label">Минимальная пауза между командами
+          <small>Защита от флуда — минимальный интервал между /командами</small></div>
+        <div class="s-ctrl">
+          <input class="s-input" type="number" id="chatGapMs" min="100" max="5000" step="100">
+          <span class="s-unit">мс</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- AFK и варпы -->
+    <div class="s-section">
+      <div class="s-section-head">🌀 AFK и телепорты</div>
+      <div class="s-row">
+        <div class="s-label">Таймаут ожидания телепорта
+          <small>Сколько ждём forcedMove после /warp</small></div>
+        <div class="s-ctrl">
+          <input class="s-input" type="number" id="warpTimeoutMs" min="1000" max="30000" step="500">
+          <span class="s-unit">мс</span>
+        </div>
+      </div>
+      <div class="s-row">
+        <div class="s-label">Длительность ходьбы в AFK-пул
+          <small>Как долго бот идёт вперёд после /warp afk</small></div>
+        <div class="s-ctrl">
+          <input class="s-input" type="number" id="afkWalkMs" min="500" max="10000" step="100">
+          <span class="s-unit">мс</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Магазин -->
+    <div class="s-section">
+      <div class="s-section-head">🛒 Магазин (/shop)</div>
+      <div class="s-row">
+        <div class="s-label">Таймаут открытия окна
+          <small>Сколько ждём windowOpen после /shop</small></div>
+        <div class="s-ctrl">
+          <input class="s-input" type="number" id="shopOpenTimeoutMs" min="500" max="15000" step="500">
+          <span class="s-unit">мс</span>
+        </div>
+      </div>
+      <div class="s-row">
+        <div class="s-label">Таймаут клика в магазине
+          <small>Сколько ждём новое окно после клика по разделу</small></div>
+        <div class="s-ctrl">
+          <input class="s-input" type="number" id="shopClickTimeoutMs" min="200" max="8000" step="100">
+          <span class="s-unit">мс</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- /free -->
+    <div class="s-section">
+      <div class="s-section-head">🎁 Награды (/free)</div>
+      <div class="s-row">
+        <div class="s-label">Задержка перед кликом слота
+          <small>Пауза перед нажатием на награду в меню /free</small></div>
+        <div class="s-ctrl">
+          <input class="s-input" type="number" id="freeSlotDelayMs" min="50" max="3000" step="50">
+          <span class="s-unit">мс</span>
+        </div>
+      </div>
+      <div class="s-row" style="grid-template-columns:1fr;">
+        <div class="s-label" style="margin-bottom:.5rem">Расписание наград (минуты через запятую)
+          <small>В какой момент (мин. от входа) собирать каждую /free награду</small></div>
+        <textarea class="s-textarea" id="freeRewardsMin" rows="2"></textarea>
+      </div>
+    </div>
+
+    <!-- Анти-таймаут -->
+    <div class="s-section">
+      <div class="s-section-head">🛡️ Анти-таймаут (защита от кика)</div>
+      <div class="s-row">
+        <div class="s-label">Минимальный интервал поворота
+          <small>Не меньше этого времени между look-пакетами</small></div>
+        <div class="s-ctrl">
+          <div class="s-range-wrap" style="width:100%">
+            <input class="s-range" type="range" id="antiTimeoutMinSec" min="10" max="120" step="1">
+            <div class="s-range-val" id="antiTimeoutMinSec-val">—</div>
+          </div>
+        </div>
+      </div>
+      <div class="s-row">
+        <div class="s-label">Максимальный интервал поворота
+          <small>Не больше этого (рандомизация между min и max)</small></div>
+        <div class="s-ctrl">
+          <div class="s-range-wrap" style="width:100%">
+            <input class="s-range" type="range" id="antiTimeoutMaxSec" min="20" max="300" step="5">
+            <div class="s-range-val" id="antiTimeoutMaxSec-val">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Память -->
+    <div class="s-section">
+      <div class="s-section-head">🧠 Память и производительность</div>
+      <div class="s-row">
+        <div class="s-label">Интервал очистки чанков
+          <small>Как часто выгружать неиспользуемые чанки из памяти</small></div>
+        <div class="s-ctrl">
+          <input class="s-input" type="number" id="chunkGcMs" min="5000" max="300000" step="5000">
+          <span class="s-unit">мс</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-actions">
+      <button class="btn btn-primary" onclick="saveSettings()">💾 Сохранить</button>
+      <button class="btn btn-secondary" onclick="resetSettings()">↺ Сброс</button>
+      <span class="save-status" id="save-status"></span>
+    </div>
+  </div>
+
+  <script>
+    const api = async (url, opts = {}) => {
+      const r = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...opts });
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    };
+
+    function el(id) { return document.getElementById(id); }
+
+    function applyToUI(s) {
+      ['chatGapMs','startStaggerMs','waveSize','waveDelayMs','warpTimeoutMs',
+       'afkWalkMs','chunkGcMs','shopOpenTimeoutMs','shopClickTimeoutMs','freeSlotDelayMs']
+        .forEach(k => { if (el(k)) el(k).value = s[k]; });
+
+      el('freeRewardsMin').value = (s.freeRewardsMin || []).join(', ');
+
+      const minEl = el('antiTimeoutMinSec'), maxEl = el('antiTimeoutMaxSec');
+      if (minEl) { minEl.value = s.antiTimeoutMinSec; el('antiTimeoutMinSec-val').textContent = s.antiTimeoutMinSec + 'с'; }
+      if (maxEl) { maxEl.value = s.antiTimeoutMaxSec; el('antiTimeoutMaxSec-val').textContent = s.antiTimeoutMaxSec + 'с'; }
+    }
+
+    function collectFromUI() {
+      const get = id => parseFloat(el(id)?.value) || 0;
+      const rewards = (el('freeRewardsMin').value || '')
+        .split(/[\s,;]+/).map(Number).filter(n => n > 0);
+      return {
+        chatGapMs:          get('chatGapMs'),
+        startStaggerMs:     get('startStaggerMs'),
+        waveSize:           get('waveSize'),
+        waveDelayMs:        get('waveDelayMs'),
+        warpTimeoutMs:      get('warpTimeoutMs'),
+        afkWalkMs:          get('afkWalkMs'),
+        chunkGcMs:          get('chunkGcMs'),
+        shopOpenTimeoutMs:  get('shopOpenTimeoutMs'),
+        shopClickTimeoutMs: get('shopClickTimeoutMs'),
+        freeSlotDelayMs:    get('freeSlotDelayMs'),
+        antiTimeoutMinSec:  get('antiTimeoutMinSec'),
+        antiTimeoutMaxSec:  get('antiTimeoutMaxSec'),
+        freeRewardsMin:     rewards,
+      };
+    }
+
+    function setStatus(msg, type) {
+      const s = el('save-status');
+      s.textContent = msg;
+      s.className = 'save-status ' + (type || '');
+      if (type === 'ok') setTimeout(() => { s.textContent = ''; s.className = 'save-status'; }, 3000);
+    }
+
+    async function saveSettings() {
+      try {
+        const body = collectFromUI();
+        const r = await api('/api/settings', { method: 'POST', body: JSON.stringify(body) });
+        applyToUI(r.settings);
+        setStatus('✓ Сохранено', 'ok');
+      } catch(e) { setStatus('Ошибка: ' + e.message, 'err'); }
+    }
+
+    async function resetSettings() {
+      if (!confirm('Сбросить все настройки к значениям по умолчанию?')) return;
+      try {
+        const r = await api('/api/settings/reset', { method: 'POST' });
+        applyToUI(r.settings);
+        setStatus('✓ Сброшено к умолчанию', 'ok');
+      } catch(e) { setStatus('Ошибка: ' + e.message, 'err'); }
+    }
+
+    // Sliders live update label
+    ['antiTimeoutMinSec','antiTimeoutMaxSec'].forEach(id => {
+      const inp = el(id), lbl = el(id + '-val');
+      if (inp && lbl) inp.addEventListener('input', () => { lbl.textContent = inp.value + 'с'; });
+    });
+
+    // Load on page load
+    (async () => {
+      try {
+        const r = await api('/api/settings');
+        applyToUI(r.settings);
+      } catch(e) { setStatus('Ошибка загрузки настроек', 'err'); }
+    })();
+  </script>
+</body>
+</html>

@@ -10,6 +10,7 @@ const mineflayer = require('mineflayer');
 const os         = require('os');
 const path       = require('path');
 const crypto     = require('crypto');
+const fs         = require('fs');
 
 const app    = express();
 const server = http.createServer(app);
@@ -44,6 +45,32 @@ const AUTO_RECONNECT_BASE_MS = 5000;
 const AUTO_RECONNECT_MAX_MS  = 60000;
 const RILIKY_LABEL_REGEX     = /(?:рилл|рилик|relic)/iu;
 const RILIKY_VALUE_REGEX     = /(?:рилл|рилик|relic)[^0-9\-]*([0-9][\d\s,.']*)/iu;
+
+// ── Изменяемые настройки (сохраняются в settings.json) ───────────────────────
+const SETTINGS_FILE = path.join(__dirname, 'settings.json');
+const SETTINGS_DEFAULTS = {
+    chatGapMs:          600,
+    startStaggerMs:     450,
+    waveSize:           10,
+    waveDelayMs:        4000,
+    warpTimeoutMs:      8000,
+    afkWalkMs:          3200,
+    chunkGcMs:          30000,
+    shopOpenTimeoutMs:  4000,
+    shopClickTimeoutMs: 1200,
+    freeSlotDelayMs:    250,
+    antiTimeoutMinSec:  32,
+    antiTimeoutMaxSec:  55,
+    freeRewardsMin:     [15, 45, 75, 120, 180, 300, 420, 520, 720, 1440],
+};
+let S = { ...SETTINGS_DEFAULTS };
+try {
+    const stored = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+    S = { ...SETTINGS_DEFAULTS, ...stored };
+} catch {}
+function saveSettings() {
+    try { fs.writeFileSync(SETTINGS_FILE, JSON.stringify(S, null, 2)); } catch {}
+}
 
 // ── Стадии бота (для явного отображения в UI) ─
 const STAGE = {
@@ -87,7 +114,7 @@ function chatSafe(id, cmd) {
         const cur = bots.get(id);
         if (!cur?.mc || cur.status !== 'online') return;
         cur.mc.chat(cmd);
-        await sleep(CHAT_MIN_GAP_MS);
+        await sleep(S.chatGapMs);
     });
     chatQueues.set(id, next.catch(() => {}));
     return next;
@@ -286,7 +313,7 @@ async function openShopCmd(id, cmd = '/shop') {
     const b = bots.get(id);
     if (!b?.mc) return null;
     return new Promise(resolve => {
-        const timer = setTimeout(() => { b.mc?.removeListener?.('windowOpen', onWin); resolve(null); }, 4000);
+        const timer = setTimeout(() => { b.mc?.removeListener?.('windowOpen', onWin); resolve(null); }, S.shopOpenTimeoutMs);
         const onWin = w => { clearTimeout(timer); resolve(w); };
         b.mc.once('windowOpen', onWin);
         b.mc.chat(cmd);
@@ -297,7 +324,7 @@ async function clickAndWaitWin(id, slot) {
     const b = bots.get(id);
     if (!b?.mc) return null;
     return new Promise(async resolve => {
-        const timer = setTimeout(() => { b.mc?.removeListener?.('windowOpen', onWin); resolve(null); }, 1200);
+        const timer = setTimeout(() => { b.mc?.removeListener?.('windowOpen', onWin); resolve(null); }, S.shopClickTimeoutMs);
         const onWin = w => { clearTimeout(timer); resolve(w); };
         b.mc.once('windowOpen', onWin);
         try { await b.mc.clickWindow(slot, 0, 0); } catch { clearTimeout(timer); b.mc?.removeListener?.('windowOpen', onWin); resolve(null); }
@@ -504,8 +531,8 @@ function scheduleBatchStart(ids, waveSize, waveDelayMs) {
         const waveIndex = Math.floor(index / safeWaveSize);
         const positionInWave = index % safeWaveSize;
         const delayMs =
-            waveIndex * (safeWaveDelayMs + safeWaveSize * BATCH_START_STAGGER_MS) +
-            positionInWave * BATCH_START_STAGGER_MS;
+            waveIndex * (safeWaveDelayMs + safeWaveSize * S.startStaggerMs) +
+            positionInWave * S.startStaggerMs;
         queueBotStart(id, delayMs);
     });
     return {
@@ -928,7 +955,7 @@ function createBot(id, config, opts = {}) {
     // Периодически чистим чанки из памяти
     b.chunkTimer = setInterval(() => {
         compactChunks(mc);
-    }, CHUNK_GC_INTERVAL_MS);
+    }, S.chunkGcMs);
 
     // ── БАН: редирект Velocity ────────────────
     mc._client.on('transfer', packet => {
@@ -1172,13 +1199,13 @@ async function goAfk(id) {
         mc.chat('/warp afk');
         // ждём телепорт по факту смещения или по сообщению чата
         const warped = await Promise.race([
-            waitWarp(mc, AFK_TELEPORT_TIMEOUT_MS),
-            waitChatMsg(mc, /телепортир|варп|warp|afk/i, AFK_TELEPORT_TIMEOUT_MS).then(m => !!m),
+            waitWarp(mc, S.warpTimeoutMs),
+            waitChatMsg(mc, /телепортир|варп|warp|afk/i, S.warpTimeoutMs).then(m => !!m),
         ]);
         if (!warped) addLog(id, LOG.WARN, '/warp afk — телепорт не подтверждён, идём дальше');
         await sleep(200);
         mc.physicsEnabled = true;
-        const walked = await walkForward(mc, AFK_MOVE_DURATION_MS);
+        const walked = await walkForward(mc, S.afkWalkMs);
         b.afkDone = true;
         setStage(id, STAGE.AFK);
         addLog(id, LOG.SUCCESS, `В афк-пуле, прошёл ${walked.toFixed(1)} блока`);
@@ -1235,14 +1262,16 @@ function startAntiTimeout(id, mc) {
                 cur.mc.look(cur._atBaseYaw + deg, e.pitch, false);
             }
         } catch {}
-        // Следующий тик — случайно через 32–55 с чтобы боты не синхронизировались
-        const delay = 32000 + Math.floor(Math.random() * 23000);
+        // Следующий тик — случайно через antiTimeoutMinSec–antiTimeoutMaxSec с
+        const range = Math.max(1, S.antiTimeoutMaxSec - S.antiTimeoutMinSec) * 1000;
+        const delay = S.antiTimeoutMinSec * 1000 + Math.floor(Math.random() * range);
         cur._atTimer = setTimeout(tick, delay);
         cur._atTimer?.unref?.();
         cur.antiTimeoutTimer = cur._atTimer;
     };
 
-    const firstDelay = 30000 + Math.floor(Math.random() * 15000);
+    const range0 = Math.max(1, S.antiTimeoutMaxSec - S.antiTimeoutMinSec) * 1000;
+    const firstDelay = S.antiTimeoutMinSec * 1000 + Math.floor(Math.random() * range0);
     b.antiTimeoutTimer = setTimeout(tick, firstDelay);
     b.antiTimeoutTimer?.unref?.();
 }
@@ -1338,8 +1367,8 @@ function scheduleRewards(id) {
 }
 function scheduleNextReward(id) {
     const b = bots.get(id);
-    if (!b || b.config.autoFree === false || !b.griefJoinedAt || b.nextFreeIndex >= FREE_REWARDS_MIN.length) return;
-    const targetMin = FREE_REWARDS_MIN[b.nextFreeIndex];
+    if (!b || b.config.autoFree === false || !b.griefJoinedAt || b.nextFreeIndex >= S.freeRewardsMin.length) return;
+    const targetMin = S.freeRewardsMin[b.nextFreeIndex];
     const elapsed   = (Date.now()-b.griefJoinedAt)/60000;
     const waitMs    = Math.max(0, (targetMin-elapsed)*60000);
     addLog(id, LOG.INFO, `Следующая /free через ${Math.round(waitMs/60000)} мин (${targetMin} мин)`);
@@ -1375,7 +1404,7 @@ async function collectFreeRewards(id, window) {
         const slot = slots[0];
         addLog(id, LOG.ACTION, `Меню /free (${size} сл.) — клик слот ${slot} (1 из ${slots.length})`);
         try {
-            await sleep(250);
+            await sleep(S.freeSlotDelayMs);
             await b.mc.clickWindow(slot, 0, 0);
             addLog(id, LOG.SUCCESS, `Награда слот ${slot} ✓`);
         } catch(e) {
@@ -2066,6 +2095,31 @@ app.get('/api/bots/export', (req, res) => {
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="bots.txt"');
     res.send(lines.join('\n'));
+});
+
+// ── Настройки ─────────────────────────────────
+app.get('/api/settings', (_req, res) => {
+    res.json({ settings: S, defaults: SETTINGS_DEFAULTS });
+});
+app.post('/api/settings', (req, res) => {
+    const body = req.body || {};
+    const numKeys = ['chatGapMs','startStaggerMs','waveSize','waveDelayMs','warpTimeoutMs',
+        'afkWalkMs','chunkGcMs','shopOpenTimeoutMs','shopClickTimeoutMs','freeSlotDelayMs',
+        'antiTimeoutMinSec','antiTimeoutMaxSec'];
+    for (const k of numKeys) {
+        const v = parseFloat(body[k]);
+        if (!isNaN(v) && v > 0) S[k] = Math.round(v);
+    }
+    if (Array.isArray(body.freeRewardsMin) && body.freeRewardsMin.length > 0) {
+        S.freeRewardsMin = body.freeRewardsMin.map(Number).filter(n => n > 0);
+    }
+    saveSettings();
+    res.json({ ok: true, settings: S });
+});
+app.post('/api/settings/reset', (_req, res) => {
+    S = { ...SETTINGS_DEFAULTS };
+    saveSettings();
+    res.json({ ok: true, settings: S });
 });
 
 io.on('connection', () => broadcastStats());
