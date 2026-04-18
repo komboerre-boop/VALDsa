@@ -799,9 +799,11 @@ function createRuntimeState() {
         reconnectTimer: null,
         relicsTimer: null,
         antiTimeoutTimer: null,
+        pasxaTimer: null,
         riliky: null,
         afkDone: false, nextFreeIndex: 0, collectingFree: false,
         navStarted: false, afkStarted: false,
+        pasxaDone: false,
         kitFarmDone: false,
         kitFarmReady: false,
         reconnectAttempts: 0,
@@ -814,7 +816,7 @@ function createRuntimeState() {
 }
 function cleanupTimers(b) {
     if (!b) return;
-    ['freeTimer','navTimer','afkTimer','authTimer','chunkTimer','startTimer','reconnectTimer','relicsTimer'].forEach(k => {
+    ['freeTimer','navTimer','afkTimer','authTimer','chunkTimer','startTimer','reconnectTimer','relicsTimer','pasxaTimer'].forEach(k => {
         if (b[k]) { clearTimeout(b[k]); b[k] = null; }
     });
     if (b.antiTimeoutTimer) { clearInterval(b.antiTimeoutTimer); b.antiTimeoutTimer = null; }
@@ -1230,7 +1232,8 @@ function markEnteredGrief(id) {
     const b = bots.get(id);
     if (!b || b.griefJoinedAt) return;
     b.griefJoinedAt = Date.now();
-    if (b.config.autoFree !== false) scheduleRewards(id);
+    if (b.config.autoFree  !== false) scheduleRewards(id);
+    if (b.config.autoPasxa !== false) schedulePasxa(id);
 
     // AFK — запускаем сразу после входа на гриф, а не через 20 сек от спауна
     if (b.config.autoAfk && !b.afkStarted) {
@@ -1475,34 +1478,65 @@ async function dumpFoodToChest(id, container) {
 }
 async function doPasxa(id) {
     const b = bots.get(id);
-    if (!b?.mc || b.status !== 'online') return;
-    addLog(id, LOG.ACTION, '/pasxa — открываю пасхальный кейс');
+    if (!b?.mc || b.status !== 'online' || b.pasxaDone) return;
+    addLog(id, LOG.ACTION, '/pasxa — открываю меню наград');
     try {
         b.mc.chat('/pasxa');
-        // ждём открытия окна
-        await new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                b.mc.removeListener('windowOpen', onWindow);
-                reject(new Error('Окно не открылось'));
+        const window = await new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+                b.mc?.removeListener('windowOpen', onWindow);
+                reject(new Error('Окно /pasxa не открылось'));
             }, 5000);
-            function onWindow(window) {
-                clearTimeout(timeout);
-                b.mc.removeListener('windowOpen', onWindow);
-                resolve(window);
-            }
+            function onWindow(win) { clearTimeout(timer); resolve(win); }
             b.mc.once('windowOpen', onWindow);
-        }).then(async window => {
-            addLog(id, LOG.ACTION, `Окно открыто: "${window.title}" — кликаю сундук (слот 13)`);
-            await sleep(600);
-            await b.mc.clickWindow(13, 0, 0);
-            addLog(id, LOG.SUCCESS, 'Пасхальный кейс получен');
-            await sleep(500);
-            try { b.mc.closeWindow(window); } catch {}
-            scheduleWorldCompaction(id, 1500);
         });
+
+        // Ищем первый кликабельный слот (не стекло, не воздух)
+        const slotIndex = window.slots.findIndex(s =>
+            s && s.name !== 'air' &&
+            !s.name.includes('stained_glass') &&
+            s.name !== 'glass_pane' && s.name !== 'glass'
+        );
+
+        addLog(id, LOG.ACTION, `Окно "${window.title}" (${window.slots.length} сл.) — слот ${slotIndex}`);
+
+        if (slotIndex < 0) {
+            addLog(id, LOG.WARN, '/pasxa: наград нет (требуется 1 час на сервере?)');
+            try { b.mc.closeWindow(window); } catch {}
+            return;
+        }
+
+        await sleep(250);
+        await b.mc.clickWindow(slotIndex, 0, 0);
+        addLog(id, LOG.SUCCESS, 'Пасхальный кейс получен ✓');
+        b.pasxaDone = true;
+        await sleep(200);
+        try { b.mc.closeWindow(window); } catch {}
+        scheduleWorldCompaction(id, 1500);
     } catch(e) {
         addLog(id, LOG.ERROR, 'ПАСХА: ' + e.message);
     }
+}
+
+const PASXA_REQUIRED_MIN = 60;
+
+function schedulePasxa(id) {
+    const b = bots.get(id);
+    if (!b || b.config.autoPasxa === false || !b.griefJoinedAt || b.pasxaDone) return;
+    if (b.pasxaTimer) { clearTimeout(b.pasxaTimer); b.pasxaTimer = null; }
+    const elapsed = (Date.now() - b.griefJoinedAt) / 60000;
+    const waitMs  = Math.max(0, (PASXA_REQUIRED_MIN - elapsed) * 60000);
+    addLog(id, LOG.INFO, waitMs > 5000
+        ? `/pasxa через ${Math.round(waitMs / 60000)} мин (нужен 1 час)`
+        : '/pasxa — пробую забрать...'
+    );
+    b.pasxaTimer = setTimeout(() => {
+        const cur = bots.get(id);
+        if (!cur?.mc || cur.status !== 'online' || cur.pasxaDone) return;
+        cur.pasxaTimer = null;
+        doPasxa(id).catch(e => addLog(id, LOG.ERROR, 'Авто-пасха: ' + e.message));
+    }, waitMs);
+    b.pasxaTimer?.unref?.();
 }
 
 // ── Открыть кейс ─────────────────────────────
@@ -1670,10 +1704,11 @@ app.post('/api/bots', (req, res) => {
         port:        String(req.body.port||'25565'),
         version:     String(req.body.version||'1.20.1'),
         authPassword:normalizePassword(req.body.authPassword, username),
-        autoAuth:    req.body.autoAuth !== false,
-        autoNav:     req.body.autoNav  !== false,
-        autoAfk:     req.body.autoAfk  !== false,
-        autoFree:    req.body.autoFree  !== false,
+        autoAuth:    req.body.autoAuth  !== false,
+        autoNav:     req.body.autoNav   !== false,
+        autoAfk:     req.body.autoAfk   !== false,
+        autoFree:    req.body.autoFree   !== false,
+        autoPasxa:   req.body.autoPasxa  !== false,
         autoReconnect:req.body.autoReconnect !== false,
         griefWorld:  parseInt(req.body.griefWorld)||1,
         kitFarm:     !!req.body.kitFarm,
@@ -1749,10 +1784,11 @@ app.post('/api/bots/batch', async (req, res) => {
             port:         String(rest.port||'25565'),
             version:      String(rest.version||'1.20.1'),
             authPassword: normalizePassword(rest.authPassword, username),
-            autoAuth:     rest.autoAuth !== false,
-            autoNav:      rest.autoNav  !== false,
-            autoAfk:      rest.autoAfk  !== false,
-            autoFree:     rest.autoFree  !== false,
+            autoAuth:     rest.autoAuth  !== false,
+            autoNav:      rest.autoNav   !== false,
+            autoAfk:      rest.autoAfk   !== false,
+            autoFree:     rest.autoFree   !== false,
+            autoPasxa:    rest.autoPasxa  !== false,
             autoReconnect:rest.autoReconnect !== false,
             griefWorld:   parseInt(rest.griefWorld)||1,
             kitFarm:      !!rest.kitFarm,
@@ -1973,6 +2009,7 @@ app.post('/api/bots/import', (req, res) => {
             autoNav:      rest.autoNav      !== false,
             autoAfk:      rest.autoAfk      !== false,
             autoFree:     rest.autoFree     !== false,
+            autoPasxa:    rest.autoPasxa    !== false,
             autoReconnect:rest.autoReconnect !== false,
             griefWorld:   parseInt(rest.griefWorld) || 1,
             kitFarm: false, kitFarmRegionOwner: null, kitFarmRegion: null,
