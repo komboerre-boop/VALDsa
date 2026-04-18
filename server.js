@@ -1335,16 +1335,15 @@ async function collectFreeRewards(id, window) {
     if (!slots.length) {
         addLog(id, LOG.WARN, `Меню /free (${size} сл.) — нет наград`);
     } else {
-        addLog(id, LOG.ACTION, `Меню /free (${size} сл.) — слоты: [${slots.join(',')}]`);
-        for (const slot of slots) {
-            if (!b.mc) break;
-            try {
-                await sleep(250);
-                await b.mc.clickWindow(slot, 0, 0);
-                addLog(id, LOG.SUCCESS, `Награда слот ${slot} ✓`);
-            } catch(e) {
-                addLog(id, LOG.ERROR, `Клик ${slot}: ` + e.message);
-            }
+        // Берём только первую доступную награду за один визит в меню
+        const slot = slots[0];
+        addLog(id, LOG.ACTION, `Меню /free (${size} сл.) — клик слот ${slot} (1 из ${slots.length})`);
+        try {
+            await sleep(250);
+            await b.mc.clickWindow(slot, 0, 0);
+            addLog(id, LOG.SUCCESS, `Награда слот ${slot} ✓`);
+        } catch(e) {
+            addLog(id, LOG.ERROR, `Клик ${slot}: ` + e.message);
         }
     }
     await sleep(200);
