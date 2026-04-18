@@ -14,7 +14,8 @@
 5. [REST API](#rest-api)
 6. [Socket.IO события](#socketio-события)
 7. [Переменные окружения](#переменные-окружения)
-8. [Зависимости](#зависимости)
+8. [Инструменты (tools/)](#инструменты-tools)
+9. [Зависимости](#зависимости)
 
 ---
 
@@ -686,6 +687,110 @@ PORT=3000    # порт HTTP сервера (по умолчанию 3000)
 Пример запуска на порту 8080:
 ```bash
 PORT=8080 node --expose-gc --max-old-space-size=512 server.js
+```
+
+---
+
+## Инструменты (`tools/`)
+
+Дополнительные утилиты на Python и C++ для мониторинга и проверки аккаунтов.
+
+---
+
+### `tools/stats_monitor.py` — Терминальный монитор ботов
+
+Живая панель в терминале: раз в 5 секунд опрашивает `/api/bots`, показывает статистику и автоматически запускает реконнект если упало слишком много ботов.
+
+**Требования:** Python 3.8+, без внешних зависимостей
+
+**Запуск:**
+```bash
+python tools/stats_monitor.py
+python tools/stats_monitor.py --host http://localhost:3000 --interval 5 --threshold 40
+```
+
+**Аргументы:**
+
+| Аргумент | По умолчанию | Описание |
+|----------|-------------|----------|
+| `--host` | `http://localhost:3000` | URL бот-менеджера |
+| `--interval` | `5` | Интервал опроса (секунды) |
+| `--threshold` | `40` | Процент офлайн ботов для авто-реконнекта |
+
+**Что показывает:**
+- Всего ботов / Online / Offline / Banned
+- Топ-5 по реликам
+- Авто-реконнект (не чаще раза в минуту) при превышении порога
+- Лог в `tools/stats_monitor.log`
+
+---
+
+### `tools/account_checker.py` — Проверка аккаунтов
+
+Многопоточный чекер: читает `bots.txt` (формат `ник:пароль`), подключается к MC серверу через raw TCP с Minecraft handshake+login пакетами, определяет валидный / заблокированный аккаунт.
+
+**Требования:** Python 3.8+, без внешних зависимостей
+
+**Запуск:**
+```bash
+python tools/account_checker.py bots.txt --host mc.example.com --port 25565 --workers 20
+```
+
+**Аргументы:**
+
+| Аргумент | По умолчанию | Описание |
+|----------|-------------|----------|
+| `bots_file` | — | Путь к `bots.txt` |
+| `--host` | обязательный | Хост MC сервера |
+| `--port` | `25565` | Порт |
+| `--workers` | `20` | Количество потоков |
+| `--timeout` | `5.0` | Таймаут подключения (сек) |
+
+**Как работает:**
+1. Подключается TCP к MC серверу
+2. Отправляет Handshake (state=2 login) + Login Start с именем аккаунта
+3. Читает ответ: `0x02` = Login Success (валид), `0x00` = Disconnect (бан/ошибка)
+
+**Выходные файлы** (рядом с `bots_file`):
+- `valid_accounts.txt` — рабочие аккаунты
+- `banned_accounts.txt` — заблокированные
+- `error_accounts.txt` — ошибки соединения
+
+---
+
+### `tools/mc_monitor.cpp` — C++ пинг-монитор сервера
+
+Отправляет правильные SLP (Server List Ping) пакеты с VarInt кодировкой, замеряет RTT, детектирует даунтайм и автоматически вызывает `POST /api/bots/reconnect/all` когда сервер восстанавливается.
+
+**Сборка (Linux/macOS):**
+```bash
+g++ -O2 -std=c++17 tools/mc_monitor.cpp -o mc_monitor
+```
+
+**Сборка (Windows MinGW):**
+```bash
+g++ -O2 -std=c++17 tools/mc_monitor.cpp -o mc_monitor.exe -lws2_32
+```
+
+**Запуск:**
+```bash
+./mc_monitor play.example.com 25565 http://localhost:3000 10
+#             ^MC хост         ^порт  ^дашборд URL         ^интервал сек
+```
+
+**Как работает:**
+1. Каждые N секунд отправляет Minecraft SLP handshake + status request
+2. Читает JSON ответ: онлайн игроки, MOTD, RTT
+3. Если сервер лёг — пишет в лог (streak=N)
+4. Когда сервер поднялся — делает HTTP POST на `/api/bots/reconnect/all` чтобы боты переподключились
+
+**Пример вывода:**
+```
+[2025-01-15 14:30:01] UP    42ms  players=127/500  MOTD: CakeWorld
+[2025-01-15 14:30:11] UP    38ms  players=129/500  MOTD: CakeWorld
+[2025-01-15 14:30:21] DOWN  (streak=1)
+[2025-01-15 14:30:31] DOWN  (streak=2)
+[2025-01-15 14:30:41] UP    55ms  players=0/500  — Server recovered, reconnect triggered
 ```
 
 ---
