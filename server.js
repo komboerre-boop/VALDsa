@@ -41,7 +41,7 @@ const CHUNK_COMPACT_DELAY_MS = 4000;
 const LOW_MEMORY_VIEW_DISTANCE = 'tiny';
 const BATCH_START_STAGGER_MS = 450;
 const DEFAULT_START_WAVE_SIZE = 10;
-const MAX_START_WAVE_SIZE   = 50;
+const MAX_START_WAVE_SIZE   = 500;
 const DEFAULT_WAVE_DELAY_MS = 4000;
 const MAX_WAVE_DELAY_MS     = 60000;
 const AUTO_RECONNECT_BASE_MS = 5000;
@@ -53,9 +53,9 @@ const RILIKY_VALUE_REGEX     = /(?:рилл|рилик|relic)[^0-9\-]*([0-9][\d\
 const SETTINGS_FILE = path.join(__dirname, 'settings.json');
 const SETTINGS_DEFAULTS = {
     chatGapMs:          600,
-    startStaggerMs:     450,
-    waveSize:           10,
-    waveDelayMs:        4000,
+    startStaggerMs:     700,   // ~1.4 бота/сек — вписывается в BungeeCord throttle
+    waveSize:           8,
+    waveDelayMs:        5000,
     warpTimeoutMs:      8000,
     afkWalkMs:          3200,
     chunkGcMs:          30000,
@@ -73,6 +73,138 @@ try {
 } catch {}
 function saveSettings() {
     try { fs.writeFileSync(SETTINGS_FILE, JSON.stringify(S, null, 2)); } catch {}
+}
+
+// ── Прокси-пул ─────────────────────────────────────────────────────────────
+const PROXIES_FILE = path.join(__dirname, 'proxies.json');
+let proxyPool = [];     // { url, alive, lastCheck, botsLimit }
+let proxyCheckRunning = false;
+
+(function loadProxiesFromDisk() {
+    try {
+        const raw = JSON.parse(fs.readFileSync(PROXIES_FILE, 'utf8'));
+        proxyPool = Array.isArray(raw)
+            ? raw.map(p => {
+                const url = normalizeProxyUrl(p.url || p);
+                if (!url) return null;
+                return { url, alive: p.alive ?? null, lastCheck: p.lastCheck || 0, botsLimit: Math.max(1, parseInt(p.botsLimit) || 10) };
+            }).filter(Boolean)
+            : [];
+    } catch {}
+})();
+
+function saveProxiesToDisk() {
+    try {
+        fs.writeFileSync(PROXIES_FILE, JSON.stringify(
+            proxyPool.map(({ url, alive, lastCheck, botsLimit }) => ({ url, alive, lastCheck, botsLimit })),
+            null, 2
+        ));
+    } catch {}
+}
+
+function normalizeProxyUrl(raw) {
+    raw = String(raw || '').trim();
+    if (!raw) return null;
+    if (/^socks[45]:\/\//i.test(raw)) return raw;
+    // ip:port  or  user:pass@ip:port
+    if (/^\d{1,3}(\.\d{1,3}){3}:\d{2,5}$/.test(raw)) return `socks5://${raw}`;
+    if (/^[^@\s]+@\d{1,3}(\.\d{1,3}){3}:\d{2,5}$/.test(raw)) return `socks5://${raw}`;
+    return null;
+}
+
+function parseProxyText(text) {
+    const seen = new Set();
+    return text.split(/[\r\n,;|\t]+/)
+        .map(l => normalizeProxyUrl(l.trim()))
+        .filter(u => u && !seen.has(u) && seen.add(u));
+}
+
+async function checkProxyUrl(url, timeoutMs = 3500) {
+    if (!SocksClient) return false;
+    try {
+        let pHost, pPort = 1080, pType = 5, pUser, pPass;
+        if (url.includes('://')) {
+            const u = new URL(url);
+            pType  = url.startsWith('socks4') ? 4 : 5;
+            pHost  = u.hostname; pPort = parseInt(u.port) || 1080;
+            pUser  = u.username || undefined; pPass = u.password || undefined;
+        } else {
+            const [h, p] = url.split(':'); pHost = h; pPort = parseInt(p) || 1080;
+        }
+        const res = await SocksClient.createConnection({
+            proxy:       { host: pHost, port: pPort, type: pType, userId: pUser, password: pPass },
+            command:     'connect',
+            destination: { host: '8.8.8.8', port: 53 },
+            timeout:     timeoutMs,
+        });
+        try { res?.socket?.destroy(); } catch {}
+        return true;
+    } catch { return false; }
+}
+
+async function fetchUrlText(url) {
+    const mod = url.startsWith('https') ? require('https') : require('http');
+    return new Promise((resolve, reject) => {
+        const req = mod.get(url, { timeout: 12000, headers: { 'User-Agent': 'Mozilla/5.0' } }, res => {
+            if (res.statusCode !== 200) { reject(new Error(`HTTP ${res.statusCode}`)); return; }
+            let d = '';
+            res.setEncoding('utf8');
+            res.on('data', c => { if (d.length < 3_000_000) d += c; });
+            res.on('end', () => resolve(d));
+        });
+        req.on('error', reject);
+        req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    });
+}
+
+const PROXY_SOURCES = [
+    'https://api.proxyscrape.com/v2/?request=displayproxies&protocol=socks5&timeout=10000&country=all',
+    'https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt',
+    'https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/socks5.txt',
+    'https://api.openproxylist.xyz/socks5.txt',
+    'https://raw.githubusercontent.com/roosterkid/openproxylist/main/SOCKS5_RAW.txt',
+];
+
+async function fetchProxiesFromSources() {
+    const seen = new Set();
+    for (const url of PROXY_SOURCES) {
+        try {
+            const text = await fetchUrlText(url);
+            parseProxyText(text).forEach(p => seen.add(p));
+        } catch {}
+    }
+    return [...seen];
+}
+
+function proxyUsageMap() {
+    const m = new Map();
+    for (const b of bots.values()) {
+        if (b.config.proxy) m.set(b.config.proxy, (m.get(b.config.proxy) || 0) + 1);
+    }
+    return m;
+}
+
+function getProxyList() {
+    const usage = proxyUsageMap();
+    return proxyPool.map((p, i) => ({
+        index: i, url: p.url, alive: p.alive,
+        lastCheck: p.lastCheck, botsLimit: p.botsLimit,
+        botsActive: usage.get(p.url) || 0,
+    }));
+}
+
+// Выбрать прокси с наименьшей нагрузкой (игнорируем confirmed-dead если есть живые)
+function pickProxy() {
+    if (!proxyPool.length) return null;
+    const usage  = proxyUsageMap();
+    const hasAlive = proxyPool.some(p => p.alive === true);
+    const pool   = proxyPool.filter(p => hasAlive ? p.alive === true : p.alive !== false);
+    if (!pool.length) return null;
+    const sorted = pool
+        .map(p => ({ url: p.url, ratio: (usage.get(p.url) || 0) / p.botsLimit }))
+        .filter(x => x.ratio < 1)
+        .sort((a, b) => a.ratio - b.ratio);
+    return sorted[0]?.url ?? null;
 }
 
 // ── Стадии бота (для явного отображения в UI) ─
@@ -856,7 +988,7 @@ function createRuntimeState() {
         disconnectHandled: false,
         suppressReconnect: false,
         stage: STAGE.OFFLINE,
-        auth: { authenticated: false, lastMode: null, lastAt: 0, attempts: { register: 0, login: 0 } },
+        auth: { authenticated: false, lastMode: null, lastAt: 0, attempts: { register: 0, login: 0 }, pendingMode: null },
         shopSession: null, shopScanResult: null,
         // Дропы с кейсов
         drops: [],          // [{type, prize, ts}] — последние 30 выбитых наград
@@ -982,12 +1114,21 @@ function markAuthenticated(id) {
 function scheduleAuth(id, mode, prompt = '', delay = jitter(DEFAULT_AUTH_DELAY_MS)) {
     const b = bots.get(id);
     if (!b?.mc || b.status === 'banned' || b.config.autoAuth === false) return;
-    if (mode === 'login' && b.auth.authenticated) return;
+    // Уже авторизованы — не нужно повторно отправлять /register или /login
+    if (b.auth.authenticated) return;
     const now = Date.now();
     if (b.auth.lastMode === mode && now - b.auth.lastAt < AUTH_RETRY_WINDOW_MS) return;
     if (b.auth.attempts[mode] >= 4) return;
+    // Если таймер уже запущен для ТОГО ЖЕ режима — не сбрасываем.
+    // Иначе сервер, шлющий несколько сообщений со словом "register" подряд,
+    // будет вечно откладывать команду: каждое сообщение сбрасывает таймер.
+    if (b.authTimer && b.auth.pendingMode === mode) return;
     if (b.authTimer) clearTimeout(b.authTimer);
-    b.authTimer = setTimeout(() => sendAuth(id, mode, prompt), delay);
+    b.auth.pendingMode = mode;
+    b.authTimer = setTimeout(() => {
+        b.auth.pendingMode = null;
+        sendAuth(id, mode, prompt);
+    }, delay);
 }
 function sendAuth(id, mode, prompt = '') {
     const b = bots.get(id);
@@ -1054,9 +1195,10 @@ function createBot(id, config, opts = {}) {
             version:  config.version || '1.20.1',
             auth:     'offline',
             hideErrors: true,
-            checkTimeoutInterval: 30000,
+            checkTimeoutInterval: 60000, // 60 с вместо 30 — сервер под нагрузкой может пропускать keepalive
             physicsEnabled: false,
             disableChatSigning: true,   // без подписи чата (1.19+)
+            skipValidation: true,       // не валидировать каждый входящий пакет — снижает CPU
             viewDistance: LOW_MEMORY_VIEW_DISTANCE,
             keepAlive: true,
             ...connectOpt,
@@ -1072,6 +1214,25 @@ function createBot(id, config, opts = {}) {
     }
 
     b.mc = mc;
+
+    // Перехватываем исходящий minecraft:brand — подменяем на 'vanilla' до отправки,
+    // чтобы сервер не видел 'mineflayer'. Делаем это через обёртку write ОДИН раз,
+    // не дублируя пакет.
+    {
+        const _write = mc._client.write.bind(mc._client);
+        mc._client.write = (name, params, ...rest) => {
+            if (name === 'custom_payload' && params?.channel === 'minecraft:brand') {
+                try {
+                    const brand = 'vanilla';
+                    const buf = Buffer.alloc(1 + brand.length);
+                    buf.writeUInt8(brand.length, 0);
+                    buf.write(brand, 1, 'utf8');
+                    params = { ...params, data: buf };
+                } catch {}
+            }
+            return _write(name, params, ...rest);
+        };
+    }
 
     // Периодически чистим чанки из памяти
     b.chunkTimer = setInterval(() => {
@@ -1096,41 +1257,8 @@ function createBot(id, config, opts = {}) {
         b.disconnectHandled = false;
         setStage(id, STAGE.LOBBY);
         scheduleRelicsRefresh(id, 1800);
-
-        // Явно говорим серверу: view distance = 2, без подписей скина
-        // уменьшает поток чанков и entity-данных от сервера
-        const settingsBase = {
-            locale: 'ru_RU', viewDistance: 2,
-            chatMode: 0, chatColors: false,
-            displayedSkinParts: 0, mainHand: 1,
-        };
-        try {
-            // 1.18+ поля
-            mc._client.write('settings', {
-                ...settingsBase,
-                enableTextFiltering: false,
-                allowServerListings: false,
-            });
-        } catch {
-            try { mc._client.write('settings', settingsBase); } catch {}
-        }
-
-        // Споофим бренд клиента как "vanilla" — защита от детекта mineflayer
-        try {
-            const brandBuf = Buffer.alloc(1 + 7);
-            brandBuf.writeUInt8(7, 0);
-            brandBuf.write('vanilla', 1, 'utf8');
-            mc._client.write('custom_payload', {
-                channel: 'minecraft:brand',
-                data: brandBuf,
-            });
-        } catch {}
-        // Регистрируем стандартные плагин-каналы ванильного клиента
-        try {
-            const channels = ['minecraft:brand','minecraft:debug/paths','minecraft:debug/neighbors_update'];
-            const regBuf = Buffer.from(channels.join('\0'));
-            mc._client.write('custom_payload', { channel: 'minecraft:register', data: regBuf });
-        } catch {}
+        // Запускаем keep-alive сразу — до spawn, чтобы фаза авторизации не таймаутила
+        startAntiTimeout(id, mc);
     });
 
     mc.on('spawn', () => {
@@ -1143,8 +1271,13 @@ function createBot(id, config, opts = {}) {
         const cur = bots.get(id); if (!cur) return;
 
         if (config.autoAuth !== false) {
-            // С авторизацией: навигация запустится из markAuthenticated сразу после входа
-            scheduleAuth(id, 'register');
+            // Авторизуемся только если ещё не вошли.
+            // На Velocity/BungeeCord spawn стреляет при КАЖДОМ переходе между серверами —
+            // если бот уже авторизован на proxy1 и попал на grief-сервер, повторный
+            // /register туда отправлять не нужно.
+            if (!cur.auth.authenticated) {
+                scheduleAuth(id, 'register');
+            }
         } else {
             // Без авторизации: навигацию и AFK запускаем сразу
             if (config.autoNav && !cur.navStarted) {
@@ -1176,6 +1309,11 @@ function createBot(id, config, opts = {}) {
         const intent = detectAuthIntent(text);
         if (!intent) return;
         if (intent.mode === 'authenticated') { markAuthenticated(id); return; }
+        // Бот уже авторизован — сервер прислал сообщение с упоминанием /register или /login
+        // (приветствие, подсказка, ответ на команду). Это «фантомный» триггер на grief-сервере
+        // после перехода с прокси. Просто игнорируем.
+        const cur2 = bots.get(id);
+        if (cur2?.auth?.authenticated) return;
         scheduleAuth(id, intent.mode, intent.prompt || '');
     });
 
@@ -1187,7 +1325,16 @@ function createBot(id, config, opts = {}) {
             await collectFreeRewards(id, window);
             return;
         }
-        if (cur.config.autoNav) await handleNavWindow(id, window);
+        // Навигационные меню нужны только пока бот НЕ добрался до гриф-сервера.
+        // На SERVER/AFK/FARMING стадии любое открытое окно — игровое (сундук, шалкер,
+        // /free и т.п.), трогать его handleNavWindow нельзя — это ведёт к двойным кликам
+        // и кику сервером.
+        if (cur.config.autoNav &&
+            cur.stage !== STAGE.SERVER &&
+            cur.stage !== STAGE.AFK &&
+            cur.stage !== STAGE.FARMING) {
+            await handleNavWindow(id, window);
+        }
     });
 
     // Ловим низкоуровневый пакет открытия окна (на случай если mineflayer пропускает)
@@ -1216,14 +1363,24 @@ function createBot(id, config, opts = {}) {
     mc.on('kicked', reason => {
         let text = '';
         try { text = extractText(JSON.parse(reason)); } catch { text = reason; }
-        const isBan    = /ban|заблокир|banned/i.test(text);
-        const isIpBlock = /не прошел проверку|не прошёл проверку|список зараженных|зараженных/i.test(text);
+        const isBan      = /ban|заблокир|banned/i.test(text);
+        const isIpBlock  = /не прошел проверку|не прошёл проверку|список зараженных|зараженных/i.test(text);
+        const isThrottle = /throttl|слишком много|too many|connection.*limit|connect.*fast/i.test(text);
+        // При throttle сбрасываем счётчик попыток — иначе экспоненциальный backoff
+        // вырастает до 60 сек, хотя throttle-окно на сервере 4–10 сек.
+        // Фиксируем задержку ~5 сек (первая попытка reconnect) вместо роста.
+        if (isThrottle) {
+            const bThrottle = bots.get(id);
+            if (bThrottle) bThrottle.reconnectAttempts = 0;
+        }
         handleDisconnect(id, mc, {
             logType: (isBan || isIpBlock) ? LOG.BAN : LOG.WARN,
             message: isIpBlock
                 ? `IP заблокирован сервером (реконнект остановлен)`
                 : isBan
                 ? `Бан: ${text}`
+                : isThrottle
+                ? `⚠️ Throttle — реконнект через 5 сек`
                 : `Кикнут: ${text}`,
             stage: isBan ? STAGE.BANNED : STAGE.OFFLINE,
             ban: isBan,
@@ -1233,6 +1390,13 @@ function createBot(id, config, opts = {}) {
     });
 
     mc.on('error', e => {
+        // ECONNREFUSED / ECONNRESET обычно = per-IP лимит или throttle сервера.
+        // Сбрасываем счётчик чтобы не уходить в экспоненциальный backoff (60 сек).
+        const isConnRefused = /ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH/i.test(e.message);
+        if (isConnRefused) {
+            const bErr = bots.get(id);
+            if (bErr) bErr.reconnectAttempts = 0;
+        }
         handleDisconnect(id, mc, {
             logType: LOG.ERROR,
             message: e.message,
@@ -1242,6 +1406,10 @@ function createBot(id, config, opts = {}) {
     });
 
     mc.on('end', () => {
+        // Если бот не успел залогиниться (b.connectedAt == null) — скорее всего
+        // сервер сбросил соединение из-за per-IP лимита. Сбрасываем backoff.
+        const bEnd = bots.get(id);
+        if (bEnd && !bEnd.connectedAt) bEnd.reconnectAttempts = 0;
         handleDisconnect(id, mc, {
             logType: LOG.SYSTEM,
             message: 'Соединение закрыто',
@@ -1254,13 +1422,47 @@ function createBot(id, config, opts = {}) {
 // ── Навигация ─────────────────────────────────
 async function doCompassNav(id) {
     const b = bots.get(id); if (!b?.mc) return;
-    const slot = b.mc.inventory.slots[36];
-    if (!slot) { addLog(id, LOG.WARN, 'Хотбар пуст'); return; }
-    await b.mc.equip(slot, 'hand');
-    addLog(id, LOG.ACTION, `Взял: ${slot.name}`);
-    await sleep(600);
-    b.mc.activateItem();
-    addLog(id, LOG.ACTION, 'ПКМ — открываю меню');
+    const mc = b.mc;
+
+    // Ищем любой предмет в хотбаре (слоты 36-44).
+    // Сервер может дать предметы с задержкой — ждём до 4 секунд.
+    let hotbarSlot = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+        if (bots.get(id)?.mc !== mc) return; // реконнект
+        // Слоты 36-44 — хотбар в порядке инвентаря mineflayer
+        for (let i = 36; i <= 44; i++) {
+            const s = mc.inventory.slots[i];
+            if (s && s.type > 0 && s.name !== 'air') { hotbarSlot = i; break; }
+        }
+        if (hotbarSlot !== null) break;
+        addLog(id, LOG.INFO, `Хотбар пуст (попытка ${attempt + 1}/5), жду предметы...`);
+        await sleep(800);
+    }
+
+    if (hotbarSlot === null) {
+        addLog(id, LOG.WARN, 'Хотбар пуст после ожидания — навигация отложена');
+        // Пробуем ещё раз через 5 секунд
+        const cur = bots.get(id);
+        if (cur?.mc === mc && cur.navStarted) {
+            cur.navStarted = false; // сбрасываем флаг чтобы markAuthenticated мог запустить ещё раз
+            cur.navTimer = setTimeout(() => {
+                if (bots.get(id)?.mc === mc) doCompassNav(id).catch(() => {});
+            }, 5000);
+        }
+        return;
+    }
+
+    if (bots.get(id)?.mc !== mc) return;
+    const item = mc.inventory.slots[hotbarSlot];
+    try {
+        await mc.equip(item, 'hand');
+        addLog(id, LOG.ACTION, `Взял: ${item.name} (слот ${hotbarSlot})`);
+        await sleep(500);
+        mc.activateItem();
+        addLog(id, LOG.ACTION, 'ПКМ — открываю меню');
+    } catch(e) {
+        addLog(id, LOG.WARN, 'Ошибка nav: ' + e.message);
+    }
 }
 
 async function handleNavWindow(id, window) {
@@ -1303,28 +1505,10 @@ async function handleNavWindow(id, window) {
             return;
         }
 
-        // Фолбэк — неизвестное меню, пробуем стандартный путь
-        addLog(id, LOG.WARN, `Неизвестное меню: "${titleText}" — фолбэк`);
-        await sleep(800);
-        await b.mc.clickWindow(2*9+4, 0, 0);
-        addLog(id, LOG.ACTION, 'Фолбэк: клик слот 22 (Гриферское выживание)');
-        // ждём пока откроется следующее окно (выбор мира грифа)
-        await sleep(1500);
-        const nextWin = b.mc.currentWindow;
-        if (nextWin) {
-            const nextRaw = nextWin.title || '';
-            const nextTitle = extractText(typeof nextRaw === 'string' ? (() => { try { return JSON.parse(nextRaw); } catch { return nextRaw; } })() : nextRaw);
-            if (/выбор мира грифа/i.test(nextTitle)) {
-                navWindowHandled.delete(id);
-                await handleNavWindow(id, nextWin);
-                return;
-            }
-        }
-        await b.mc.clickWindow(1*9+2, 0, 0);
-        addLog(id, LOG.ACTION, 'Фолбэк: клик слот 11 → переход на сервер');
-        markEnteredGrief(id);
-        setStage(id, STAGE.SERVER);
-        scheduleWorldCompaction(id);
+        // Неизвестное меню — ничего не делаем, просто логируем.
+        // Раньше здесь был фолбэк с clickWindow(22), который кликал слот 22
+        // в любом окне (шалкер, сундук и т.п.) → двойной клик → кик сервером.
+        addLog(id, LOG.INFO, `Неизвестное навигационное меню: "${titleText}" — пропускаю`);
         navWindowHandled.delete(id);
     } catch(e) {
         addLog(id, LOG.ERROR, 'Клик меню: ' + e.message);
@@ -1386,38 +1570,39 @@ async function walkForward(mc, dur) {
     return hDist(mc.entity?.position, start);
 }
 
-// ── Анти-таймаут: редкие небольшие повороты, без накопления дрейфа ──
+// ── Анти-таймаут: лёгкий keep-alive через _client.write('keep_alive') ──────
+// Запускаем сразу после login (ещё до spawn), чтобы не получить 30-секундный
+// таймаут во время фазы авторизации. Интервал — каждые 15-25 секунд.
 function startAntiTimeout(id, mc) {
     const b = bots.get(id);
     if (!b || b.antiTimeoutTimer) return;
-    // Сохраняем базовый угол поворота — не даём дрейфу накапливаться
     b._atBaseYaw = mc.entity?.yaw ?? 0;
-    b._atDir     = 1;
+    b._atDir = 1;
 
     const tick = () => {
         const cur = bots.get(id);
-        if (!cur?.mc || cur.mc !== mc || cur.status !== 'online') return;
+        if (!cur?.mc || cur.mc !== mc) return;
         try {
+            // Если уже заспавнились — делаем миниатюрный поворот (выглядит как живой игрок)
             const e = cur.mc.entity;
-            if (e) {
-                // Чередуем лево/право ±1.5–3° — выглядит как ручная подправка
-                const deg = (0.026 + Math.random() * 0.026) * cur._atDir;
+            if (e && cur.status === 'online') {
+                const deg = (0.02 + Math.random() * 0.02) * cur._atDir;
                 cur._atDir *= -1;
-                cur.mc.look(cur._atBaseYaw + deg, e.pitch, false);
+                cur.mc.look(cur._atBaseYaw + deg, e.pitch ?? 0, false);
             }
         } catch {}
-        // Следующий тик — случайно через antiTimeoutMinSec–antiTimeoutMaxSec с
-        const range = Math.max(1, S.antiTimeoutMaxSec - S.antiTimeoutMinSec) * 1000;
-        const delay = S.antiTimeoutMinSec * 1000 + Math.floor(Math.random() * range);
-        cur._atTimer = setTimeout(tick, delay);
-        cur._atTimer?.unref?.();
-        cur.antiTimeoutTimer = cur._atTimer;
+        // 15-25 секунд — гарантированно меньше checkTimeoutInterval (60 с)
+        const delay = 15000 + Math.floor(Math.random() * 10000);
+        const t = setTimeout(tick, delay);
+        try { t.unref?.(); } catch {}
+        cur.antiTimeoutTimer = t;
     };
 
-    const range0 = Math.max(1, S.antiTimeoutMaxSec - S.antiTimeoutMinSec) * 1000;
-    const firstDelay = S.antiTimeoutMinSec * 1000 + Math.floor(Math.random() * range0);
-    b.antiTimeoutTimer = setTimeout(tick, firstDelay);
-    b.antiTimeoutTimer?.unref?.();
+    // Первый тик через 10-18 с — сразу после login чтобы перекрыть 30-секундный лаг
+    const firstDelay = 10000 + Math.floor(Math.random() * 8000);
+    const t0 = setTimeout(tick, firstDelay);
+    try { t0.unref?.(); } catch {}
+    b.antiTimeoutTimer = t0;
 }
 
 // ── Награды /free ─────────────────────────────
@@ -1533,30 +1718,41 @@ function scheduleNextReward(id) {
         }
     }, waitMs);
 }
+// Декоративные блоки GUI — кликать их бесполезно
+const FREE_DECO_ITEMS = new Set([
+    'air', 'gray_stained_glass_pane', 'black_stained_glass_pane',
+    'white_stained_glass_pane', 'light_gray_stained_glass_pane',
+]);
+
 async function collectFreeRewards(id, window) {
     const b = bots.get(id); if (!b?.mc) return;
-    const size = window.slots.length;
+    const mc = b.mc;
+    const size  = window.slots.length;
+    // Собираем ВСЕ не-декоративные слоты (обычно это все награды за визит)
     const slots = [];
     for (let i = 0; i < size; i++) {
         const s = window.slots[i];
-        if (s && s.name !== 'gray_stained_glass_pane' && s.name !== 'air') slots.push(i);
+        if (s && !FREE_DECO_ITEMS.has(s.name)) slots.push(i);
     }
     if (!slots.length) {
         addLog(id, LOG.WARN, `Меню /free (${size} сл.) — нет наград`);
     } else {
-        // Берём только первую доступную награду за один визит в меню
-        const slot = slots[0];
-        addLog(id, LOG.ACTION, `Меню /free (${size} сл.) — клик слот ${slot} (1 из ${slots.length})`);
-        try {
-            await sleep(S.freeSlotDelayMs);
-            await b.mc.clickWindow(slot, 0, 0);
-            addLog(id, LOG.SUCCESS, `Награда слот ${slot} ✓`);
-        } catch(e) {
-            addLog(id, LOG.ERROR, `Клик ${slot}: ` + e.message);
+        addLog(id, LOG.ACTION, `Меню /free (${size} сл.) — кликаю ${slots.length} слотов`);
+        let collected = 0;
+        for (const slot of slots) {
+            if (bots.get(id)?.mc !== mc) break; // реконнект во время сбора
+            try {
+                await sleep(S.freeSlotDelayMs);
+                await mc.clickWindow(slot, 0, 0);
+                collected++;
+            } catch(e) {
+                addLog(id, LOG.ERROR, `Клик ${slot}: ` + e.message);
+            }
         }
+        if (collected > 0) addLog(id, LOG.SUCCESS, `Награды /free ✓ (${collected}/${slots.length})`);
     }
-    await sleep(200);
-    try { if (b.mc) b.mc.closeWindow(window); } catch {}
+    await sleep(300);
+    try { if (b.mc && b.mc === mc) b.mc.closeWindow(window); } catch {}
     b.collectingFree = false;
     b.nextFreeIndex++;
     scheduleWorldCompaction(id, 1500);
@@ -1745,48 +1941,47 @@ function schedulePasxa(id) {
     b.pasxaTimer?.unref?.();
 }
 
-// ── Открыть кейс ─────────────────────────────
-// Маршрут после /warp case: 4 вперёд → 1 вправо → 8 вперёд → 1 влево → ПКМ шалкер
+// ── Открыть кейс с риликами ──────────────────
+// Маршрут: /warp case → налево 90° → 6 блоков → направо 90° → 5 блоков → шалкер
+// Логика: открываем шалкер спамом ПКМ → кликаем все кейсы → если выкинуло из меню →
+//         снова открываем шалкер → повторяем до тех пор, пока шалкер не опустеет
 async function doOpenCase(id) {
     const b = bots.get(id);
     if (!b?.mc || b.status !== 'online') return;
     const mc = b.mc;
-    addLog(id, LOG.ACTION, '/warp case — иду к шалкеру');
+    addLog(id, LOG.ACTION, '🏆 Рилики: /warp case → иду к шалкеру');
+
     try {
         // 1. Варп
         mc.chat('/warp case');
         const warped = await waitWarp(mc, S.warpTimeoutMs);
         if (!warped) addLog(id, LOG.WARN, '/warp case: телепорт не подтверждён, продолжаем');
-        await sleep(600);
+        await sleep(800);
 
-        // 2. Маршрут: 4 вперёд → 1 вправо → 8 вперёд → 1 влево
-        const prevPhysics = mc.physicsEnabled;
+        // 2. Маршрут: налево 90° → 6 блоков → направо 90° → 5 блоков
+        const initialYaw = mc.entity?.yaw ?? 0;
         mc.physicsEnabled = true;
         mc.setControlState('sprint', true);
 
+        // Повернуть налево 90° и пройти 6 блоков
+        mc.look(initialYaw - Math.PI / 2, 0, true);
+        await sleep(250);
         mc.setControlState('forward', true);
-        await sleep(800);                          // ~4 блока вперёд
+        await sleep(1150);   // ~6 блоков вперёд (спринт ~5.2 бл/с)
         mc.setControlState('forward', false);
-        await sleep(80);
+        await sleep(150);
 
-        mc.setControlState('right', true);
-        await sleep(200);                          // ~1 блок вправо
-        mc.setControlState('right', false);
-        await sleep(80);
-
+        // Повернуть направо 90° (возврат к initialYaw) и пройти 5 блоков
+        mc.look(initialYaw, 0, true);
+        await sleep(250);
         mc.setControlState('forward', true);
-        await sleep(1550);                         // ~8 блоков вперёд
+        await sleep(970);    // ~5 блоков вперёд
         mc.setControlState('forward', false);
-        await sleep(80);
-
-        mc.setControlState('left', true);
-        await sleep(200);                          // ~1 блок влево
-        mc.setControlState('left', false);
         mc.setControlState('sprint', false);
-        mc.physicsEnabled = prevPhysics;
-        await sleep(200);
+        mc.physicsEnabled = false;
+        await sleep(300);
 
-        // 3. Ищем шалкер рядом (блок или сущность)
+        // 3. Вспомогательная функция поиска шалкера
         const findShulker = () => {
             const blk = mc.findBlock({
                 matching: bl => bl && (bl.name === 'shulker_box' || bl.name?.includes('shulker')),
@@ -1802,72 +1997,127 @@ async function doOpenCase(id) {
             return null;
         };
 
-        // 4. Спамим ПКМ пока окно шалкера не откроется (макс 8 сек)
-        addLog(id, LOG.ACTION, 'Ищу шалкер — спам ПКМ');
-        const shulkerWin = await new Promise((resolve, reject) => {
-            let opened = false;
+        // 4. Открыть шалкер (спам ПКМ до windowOpen, макс 8 сек)
+        const openShulker = () => new Promise((resolve, reject) => {
+            let done = false;
             const deadline = setTimeout(() => {
-                clearInterval(spam);
+                clearInterval(spamIv);
                 mc.removeListener('windowOpen', onWin);
-                if (!opened) reject(new Error('Шалкер не открылся (8 сек)'));
+                if (!done) reject(new Error('Шалкер не открылся за 8 сек'));
             }, 8000);
-            function onWin(w) {
-                opened = true; clearInterval(spam); clearTimeout(deadline);
-                mc.removeListener('windowOpen', onWin); resolve(w);
-            }
-            mc.once('windowOpen', onWin);
-            const spam = setInterval(async () => {
-                if (opened) return;
+            const onWin = (w) => {
+                done = true; clearInterval(spamIv); clearTimeout(deadline);
+                mc.removeListener('windowOpen', onWin);
+                resolve(w);
+            };
+            mc.on('windowOpen', onWin);
+            const spamIv = setInterval(async () => {
+                if (done) return;
                 try {
                     const t = findShulker();
-                    if (t?.type === 'entity') await mc.activateEntityAt(t.ref);
-                    else if (t?.type === 'block') await mc.activateBlock(t.ref);
+                    if (t?.type === 'block') await mc.activateBlock(t.ref);
+                    else if (t?.type === 'entity') await mc.activateEntityAt(t.ref);
                 } catch {}
-            }, 200);
+            }, 300);
+            // первый клик сразу
             (async () => {
                 try {
                     const t = findShulker();
-                    if (t?.type === 'entity') await mc.activateEntityAt(t.ref);
-                    else if (t?.type === 'block') await mc.activateBlock(t.ref);
-                    else addLog(id, LOG.WARN, 'Шалкер не найден рядом, жду открытие...');
+                    if (t?.type === 'block') await mc.activateBlock(t.ref);
+                    else if (t?.type === 'entity') await mc.activateEntityAt(t.ref);
+                    else addLog(id, LOG.WARN, 'Шалкер не найден рядом — жду...');
                 } catch {}
             })();
         });
 
-        // 5. Окно шалкера — ищем кейс (не стекло, не воздух)
-        addLog(id, LOG.ACTION, `Меню шалкера "${shulkerWin.title}" — ищу кейс`);
-        await sleep(150);
-        const caseSlot = shulkerWin.slots.findIndex(s =>
-            s && s.name !== 'air' &&
-            !s.name.includes('stained_glass') &&
-            s.name !== 'glass_pane' && s.name !== 'glass'
-        );
-        if (caseSlot < 0) {
-            addLog(id, LOG.WARN, 'Кейс не найден в меню (нет кейсов?)');
-            try { mc.closeWindow(shulkerWin); } catch {}
-            return;
-        }
-        addLog(id, LOG.ACTION, `Кликаю кейс (слот ${caseSlot})`);
-        await mc.clickWindow(caseSlot, 0, 0);
-        await sleep(200);
+        // Декоративные предметы — не кейсы
+        const isDeco = s => !s || s.name === 'air' ||
+            s.name?.includes('stained_glass') || s.name === 'glass_pane' || s.name === 'glass';
 
-        // 6. Ждём окно результата кейса и закрываем
-        const resultWin = await new Promise(resolve => {
-            const t = setTimeout(() => resolve(null), 2500);
-            mc.once('windowOpen', w => { clearTimeout(t); resolve(w); });
-        });
-        if (resultWin) {
-            addLog(id, LOG.SUCCESS, `Кейс открыт ✓ (${resultWin.title})`);
-            await sleep(jitter(300));
-            try { mc.closeWindow(resultWin); } catch {}
-        } else {
-            addLog(id, LOG.SUCCESS, 'Кейс открыт ✓');
+        // 5. Основной цикл: открываем шалкер → кликаем всё → переоткрываем если выкинуло
+        let totalClicked = 0;
+        let iterations   = 0;
+        const MAX_ITERS  = 60; // защита от бесконечного цикла
+
+        while (bots.get(id)?.mc === mc && b.status === 'online' && iterations < MAX_ITERS) {
+            iterations++;
+            addLog(id, LOG.ACTION, `Открываю шалкер (итерация ${iterations})...`);
+
+            let win;
+            try {
+                win = await openShulker();
+            } catch(e) {
+                addLog(id, LOG.WARN, `Шалкер: ${e.message} — выход`);
+                break;
+            }
+            await sleep(200);
+
+            // Собираем слоты с кейсами (не декор)
+            const slots = [];
+            for (let i = 0; i < win.slots.length; i++) {
+                if (!isDeco(win.slots[i])) slots.push(i);
+            }
+
+            if (slots.length === 0) {
+                addLog(id, LOG.SUCCESS, `🏆 Шалкер пуст — открыто итого: ${totalClicked}`);
+                try { mc.closeWindow(win); } catch {}
+                break;
+            }
+
+            addLog(id, LOG.ACTION, `Шалкер: ${slots.length} кейс(ов) — кликаю`);
+
+            // Кликаем все слоты с кейсами
+            let kickedFromMenu = false;
+            for (const slot of slots) {
+                if (!mc.currentWindow) { kickedFromMenu = true; break; }
+
+                try {
+                    await mc.clickWindow(slot, 0, 0);
+                    totalClicked++;
+                    await sleep(jitter(250));
+
+                    // Ожидаем sub-окно результата (если сервер его открывает)
+                    const sub = await new Promise(resolve => {
+                        const t = setTimeout(() => resolve(null), 1200);
+                        const onSub = (w) => { clearTimeout(t); mc.removeListener('windowOpen', onSub); resolve(w); };
+                        mc.once('windowOpen', onSub);
+                    });
+                    if (sub) {
+                        addLog(id, LOG.SUCCESS, `Кейс #${totalClicked} ✓ (${sub.title})`);
+                        await sleep(jitter(150));
+                        try { mc.closeWindow(sub); } catch {}
+                        await sleep(jitter(150));
+                    } else {
+                        addLog(id, LOG.SUCCESS, `Кейс #${totalClicked} ✓`);
+                    }
+
+                    if (!mc.currentWindow) { kickedFromMenu = true; break; }
+                } catch(e) {
+                    if (!mc.currentWindow) { kickedFromMenu = true; break; }
+                    addLog(id, LOG.WARN, `clickWindow слот ${slot}: ${e.message}`);
+                }
+            }
+
+            // Закрываем окно если ещё открыто
+            if (mc.currentWindow) {
+                try { mc.closeWindow(mc.currentWindow); } catch {}
+            }
+
+            if (kickedFromMenu) {
+                addLog(id, LOG.ACTION, 'Выкинуло из меню — переоткрываю шалкер');
+                await sleep(jitter(500));
+            } else {
+                await sleep(jitter(300));
+            }
+
+            if (!bots.get(id)?.mc || bots.get(id).status !== 'online') break;
         }
-        try { mc.closeWindow(shulkerWin); } catch {}
+
         scheduleWorldCompaction(id, 1500);
+        addLog(id, LOG.INFO, `🏆 Рилики завершены: открыто ${totalClicked} кейс(ов)`);
 
     } catch(e) {
-        addLog(id, LOG.ERROR, 'Кейс: ' + e.message);
+        addLog(id, LOG.ERROR, 'doOpenCase: ' + e.message);
     }
 }
 
@@ -1889,6 +2139,30 @@ async function doPasxaCaseForce(id) {
     await doPasxaForce(id);
     await sleep(600);
     await doOpenCase(id);
+}
+
+// ── Выбросить инвентарь (с опциональным фильтром) ───────────────────────
+// only: массив строк — бросаем ТОЛЬКО предметы, чьё имя содержит хотя бы одну строку
+// Если only пусто/null — бросаем всё
+async function doDropAll(id, only = null) {
+    const b = bots.get(id);
+    if (!b?.mc || b.status !== 'online') return 0;
+    const mc = b.mc;
+    let slots = mc.inventory.slots.filter(s => s != null && s.type > 0);
+    if (only && only.length > 0) {
+        const filter = only.map(s => s.toLowerCase().trim()).filter(Boolean);
+        slots = slots.filter(s => {
+            const n = (s.name || '').toLowerCase();
+            return filter.some(f => n.includes(f));
+        });
+    }
+    let dropped = 0;
+    for (const item of slots) {
+        if (bots.get(id)?.mc !== mc) break;
+        try { await mc.tossStack(item); dropped++; await sleep(60); } catch {}
+    }
+    if (dropped > 0) addLog(id, LOG.ACTION, `🎒 Выброшено: ${dropped} стаков${only?.length ? ` (фильтр: ${only.join(', ')})` : ''}`);
+    return dropped;
 }
 
 // ── Очистка ──────────────────────────────────
@@ -1940,6 +2214,9 @@ app.post('/api/bots', (req, res) => {
     const host     = String(req.body.host||'').trim();
     const username = makeUniqueUsername(req.body.username);
     if (!host||!username) return res.status(400).json({error:'host и username обязательны'});
+    // Прокси: явно указан → используем его, иначе авто из пула
+    const explicitProxy = req.body.proxy ? normalizeProxyUrl(String(req.body.proxy).trim()) : null;
+    const proxy = explicitProxy || pickProxy() || undefined;
     const config = {
         host, username,
         port:        String(req.body.port||'25565'),
@@ -1955,6 +2232,7 @@ app.post('/api/bots', (req, res) => {
         kitFarm:     !!req.body.kitFarm,
         kitFarmRegionOwner: req.body.kitFarmRegionOwner ? String(req.body.kitFarmRegionOwner).trim() : null,
         kitFarmRegion: req.body.kitFarmRegion ? String(req.body.kitFarmRegion).trim() : null,
+        ...(proxy ? { proxy } : {}),
     };
     const id = nextId++;
     bots.set(id, buildBotState(id, config, 'connecting', STAGE.CONNECTING));
@@ -1970,7 +2248,7 @@ app.post('/api/bots/batch', async (req, res) => {
     const host = String(rest.host||'').trim();
     if (!host||!base) return res.status(400).json({error:'host и base обязательны'});
     const normalizedBase = normalizeUsername(base);
-    const requestedCount = Math.min(Math.max(1,parseInt(count)||1), 100);
+    const requestedCount = Math.min(Math.max(1,parseInt(count)||1), 500);
     const singleOnlyDueToMaxUsername = normalizedBase.length >= USERNAME_MAX_LEN && requestedCount > 1;
     const n = singleOnlyDueToMaxUsername ? 1 : requestedCount;
 
@@ -2017,9 +2295,11 @@ app.post('/api/bots/batch', async (req, res) => {
 
     // ── Создаём остальных ботов — они НЕ стартуют сразу ──
     const workerIds = [];
+    const batchProxyOverride = rest.proxy ? normalizeProxyUrl(String(rest.proxy).trim()) : null;
     for (let i = 0; i < n; i++) {
         const username = makeUniqueUsername(base);
         if (ownerUsername && username.toLowerCase() === ownerUsername.toLowerCase()) continue;
+        const assignedProxy = batchProxyOverride || pickProxy() || undefined;
         const config = {
             host, username,
             port:         String(rest.port||'25565'),
@@ -2035,6 +2315,7 @@ app.post('/api/bots/batch', async (req, res) => {
             kitFarm:      !!rest.kitFarm,
             kitFarmRegionOwner: ownerUsername || null,
             kitFarmRegion: rest.kitFarmRegion ? String(rest.kitFarmRegion).trim() : null,
+            ...(assignedProxy ? { proxy: assignedProxy } : {}),
         };
         const id = nextId++;
         bots.set(id, buildBotState(id, config, 'offline', STAGE.QUEUED));
@@ -2171,6 +2452,18 @@ app.post('/api/bots/case/all', async (req, res) => {
     for (const id of ids) { doOpenCase(id).catch(() => {}); await sleep(500); }
 });
 
+// ── Рилики (кейс) — для одного бота ─────────
+app.post('/api/bots/:id/riliks', (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    doOpenCase(id).catch(() => {});
+    res.json({ ok: true });
+});
+app.post('/api/bots/riliks/all', async (req, res) => {
+    const ids = [...bots.keys()];
+    res.json({ ok: true, count: ids.length });
+    for (const id of ids) { doOpenCase(id).catch(() => {}); await sleep(600); }
+});
+
 // ── Пасха → Кейс ─────────────────────────────
 app.post('/api/bots/:id/pasxa-case', async (req, res) => {
     const id = parseInt(req.params.id,10);
@@ -2203,6 +2496,168 @@ app.post('/api/bots/pasxa-grab-case/all', async (req, res) => {
     const ids = [...bots.keys()];
     res.json({ ok: true, count: ids.length });
     for (const id of ids) { doPasxaCaseForce(id).catch(() => {}); await sleep(600); }
+});
+
+// ── Выбросить инвентарь ────────────────────────
+app.post('/api/bots/:id/drop-all', async (req, res) => {
+    const id   = parseInt(req.params.id, 10);
+    const b    = bots.get(id);
+    if (!b?.mc || b.status !== 'online') return res.status(400).json({ error: 'Бот не онлайн' });
+    const only = Array.isArray(req.body?.items) ? req.body.items : null;
+    try {
+        const dropped = await doDropAll(id, only);
+        res.json({ ok: true, dropped });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/bots/drop-all/all', async (req, res) => {
+    const only = Array.isArray(req.body?.items) ? req.body.items : null;
+    const ids  = [...bots.keys()];
+    res.json({ ok: true, count: ids.length });
+    for (const id of ids) { doDropAll(id, only).catch(() => {}); await sleep(200); }
+});
+
+// ── Прокси API ─────────────────────────────────
+// Список
+app.get('/api/proxies', (_req, res) => {
+    res.json({ ok: true, proxies: getProxyList(), socks_available: !!SocksClient });
+});
+
+// Добавить / импортировать (текст или массив)
+app.post('/api/proxies/import', (req, res) => {
+    const raw   = req.body?.text || (Array.isArray(req.body?.urls) ? req.body.urls.join('\n') : '');
+    const limit = Math.max(1, parseInt(req.body?.botsLimit) || 10);
+    const parsed = parseProxyText(String(raw));
+    const existing = new Set(proxyPool.map(p => p.url));
+    let added = 0;
+    for (const url of parsed) {
+        if (!existing.has(url)) {
+            proxyPool.push({ url, alive: null, lastCheck: 0, botsLimit: limit });
+            existing.add(url);
+            added++;
+        }
+    }
+    saveProxiesToDisk();
+    res.json({ ok: true, added, total: proxyPool.length });
+});
+
+// Скачать с популярных источников
+app.post('/api/proxies/fetch', async (req, res) => {
+    try {
+        const sources = Array.isArray(req.body?.sources) ? req.body.sources : PROXY_SOURCES;
+        const limit   = Math.max(1, parseInt(req.body?.botsLimit) || 10);
+        const list    = await fetchProxiesFromSources(sources);
+        const existing = new Set(proxyPool.map(p => p.url));
+        let added = 0;
+        for (const url of list) {
+            if (!existing.has(url)) {
+                proxyPool.push({ url, alive: null, lastCheck: 0, botsLimit: limit });
+                existing.add(url);
+                added++;
+            }
+        }
+        saveProxiesToDisk();
+        res.json({ ok: true, added, total: proxyPool.length });
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Проверить все — стримим прогресс через Socket.IO
+app.post('/api/proxies/check', async (req, res) => {
+    if (proxyCheckRunning) return res.status(409).json({ error: 'Проверка уже запущена' });
+    proxyCheckRunning = true;
+    res.json({ ok: true, total: proxyPool.length });
+
+    const timeout    = Math.max(1000, Math.min(8000, parseInt(req.body?.timeoutMs) || 2000));
+    const CONCURRENCY = 25; // sliding window — не батч, а постоянно N задач в полёте
+    let done = 0;
+    const total = proxyPool.length;
+
+    // Буфер обновлений для UI — не спамим Socket.IO на каждый результат,
+    // а сбрасываем раз в 300 мс. Это снимает лаг при 1000+ прокси.
+    let pendingEmits = [];
+    const flushTimer = setInterval(() => {
+        if (!pendingEmits.length) return;
+        for (const ev of pendingEmits) io.emit('proxy:checked', ev);
+        pendingEmits = [];
+    }, 300);
+
+    (async () => {
+        try {
+            // Sliding-window semaphore: всегда CONCURRENCY задач в параллели
+            let nextIdx = 0;
+            let active  = 0;
+            await new Promise((resolve) => {
+                function trySpawn() {
+                    while (active < CONCURRENCY && nextIdx < total) {
+                        const i = nextIdx++;
+                        active++;
+                        const p = proxyPool[i];
+                        checkProxyUrl(p.url, timeout).then(alive => {
+                            p.alive = alive; p.lastCheck = Date.now(); done++;
+                            pendingEmits.push({ index: i, url: p.url, alive, done, total });
+                            active--;
+                            if (done === total) resolve();
+                            else trySpawn();
+                        });
+                    }
+                    if (active === 0 && nextIdx >= total) resolve();
+                }
+                trySpawn();
+            });
+        } finally {
+            clearInterval(flushTimer);
+            // Сбрасываем оставшиеся буферизованные события
+            for (const ev of pendingEmits) io.emit('proxy:checked', ev);
+            pendingEmits = [];
+            proxyCheckRunning = false;
+            saveProxiesToDisk();
+            io.emit('proxy:check-done', { total, alive: proxyPool.filter(p => p.alive).length });
+        }
+    })();
+});
+
+// Проверить один
+app.post('/api/proxies/:index/check', async (req, res) => {
+    const i = parseInt(req.params.index, 10);
+    const p = proxyPool[i];
+    if (!p) return res.status(404).json({ error: 'Не найден' });
+    const alive = await checkProxyUrl(p.url, 3500);
+    p.alive = alive; p.lastCheck = Date.now();
+    saveProxiesToDisk();
+    res.json({ ok: true, alive });
+});
+
+// Обновить лимит ботов / метку
+app.patch('/api/proxies/:index', (req, res) => {
+    const i = parseInt(req.params.index, 10);
+    const p = proxyPool[i];
+    if (!p) return res.status(404).json({ error: 'Не найден' });
+    if (req.body?.botsLimit != null) p.botsLimit = Math.max(1, parseInt(req.body.botsLimit) || 10);
+    saveProxiesToDisk();
+    res.json({ ok: true, proxy: { ...p, index: i } });
+});
+
+// Удалить всех мёртвых (должен быть ПЕРЕД /:index)
+app.delete('/api/proxies/dead', (_req, res) => {
+    const before = proxyPool.length;
+    proxyPool = proxyPool.filter(p => p.alive !== false);
+    saveProxiesToDisk();
+    res.json({ ok: true, removed: before - proxyPool.length, total: proxyPool.length });
+});
+
+// Очистить всё
+app.delete('/api/proxies', (_req, res) => {
+    proxyPool = [];
+    saveProxiesToDisk();
+    res.json({ ok: true });
+});
+
+// Удалить один (должен быть ПОСЛЕ специфичных путей)
+app.delete('/api/proxies/:index', (req, res) => {
+    const i = parseInt(req.params.index, 10);
+    if (!proxyPool[i]) return res.status(404).json({ error: 'Не найден' });
+    proxyPool.splice(i, 1);
+    saveProxiesToDisk();
+    res.json({ ok: true, total: proxyPool.length });
 });
 
 // ── Дропы ─────────────────────────────────────

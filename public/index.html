@@ -656,6 +656,7 @@ input[type=range] {
         <button class="btn btn-primary" onclick="openModal()">+ Создать ботов</button>
         <a class="btn btn-secondary" href="/relics.html">🏆 Лидерборд</a>
         <button class="btn btn-secondary" onclick="doReconnectAll()">↺ Реконнект всех</button>
+        <button class="btn btn-secondary" onclick="doRiliksAll()" style="border-color:rgba(167,139,250,.5);color:#a78bfa;" title="Открыть кейсы с риликами для всех ботов">🏆 Рилики</button>
         <button class="btn btn-secondary" onclick="doCaseAll()" style="border-color:rgba(57,217,138,.4);color:#39d98a;">📦 Кейс</button>
         <button class="btn btn-secondary" onclick="doPasxaAll()" style="border-color:rgba(245,184,79,.4);color:#f5b84f;">🐣 ПАСХА</button>
         <button class="btn btn-secondary" onclick="doPasxaGrabAll()" style="border-color:rgba(167,139,250,.5);color:#a78bfa;" title="Забрать /pasxa прямо сейчас (без проверки часа)">🐣 Забрать</button>
@@ -664,6 +665,11 @@ input[type=range] {
         <button class="btn btn-secondary" id="bc-btn" onclick="openBroadcast()" style="border-color:var(--c-brd-hov);color:var(--accent);">📡 Все боты</button>
         <button class="btn btn-secondary" onclick="exportBots()" style="border-color:rgba(57,217,138,.4);color:#39d98a;">📤 Экспорт</button>
         <button class="btn btn-secondary" onclick="openImportModal()" style="border-color:rgba(245,184,79,.4);color:#f5b84f;">📥 Импорт</button>
+        <button class="btn btn-secondary" onclick="openProxyModal()" style="border-color:rgba(99,202,183,.4);color:#63cab7;" title="Управление прокси">🌐 Прокси</button>
+        <div style="display:flex;align-items:center;gap:.3rem;">
+          <input id="drop-filter-global" class="field-input" style="width:120px;font-size:.72rem;padding:.28rem .5rem;border-radius:.5rem;" placeholder="dirt,stone…" title="Фильтр предметов через запятую (пусто = всё)">
+          <button class="btn btn-secondary" onclick="doDropAllBots()" style="border-color:rgba(255,165,0,.4);color:#ffa040;white-space:nowrap;" title="Выбросить предметы (по фильтру) у всех ботов">🎒 Выбросить всё</button>
+        </div>
         <button class="btn btn-danger" onclick="doDeleteAll()" style="border-color:rgba(255,71,87,.4);">🗑️ Удалить всех</button>
         <!-- Быстрый переключатель темы -->
         <div class="nav-theme-dots" title="Тема">
@@ -713,10 +719,13 @@ input[type=range] {
           <div class="action-row">
             <button class="btn btn-secondary" onclick="doAfk()">🏊 AFK</button>
             <button class="btn btn-secondary" onclick="openShop()" style="border-color:var(--c-brd-hov);color:var(--accent);">🛒 Магазин</button>
+            <button class="btn btn-secondary" onclick="doRiliks()" style="border-color:rgba(167,139,250,.5);color:#a78bfa;" title="Открыть кейсы с риликами">🏆 Рилики</button>
             <button class="btn btn-secondary" onclick="doCase()" style="border-color:rgba(57,217,138,.4);color:#39d98a;">📦 Кейс</button>
             <button class="btn btn-secondary" onclick="doPasxaGrab()" style="border-color:rgba(167,139,250,.5);color:#a78bfa;" title="Забрать /pasxa прямо сейчас">🐣 Забрать</button>
             <button class="btn btn-secondary" onclick="doPasxaGrabCase()" style="border-color:rgba(167,139,250,.5);color:#a78bfa;" title="Забрать + открыть кейс">🐣📦 Забрать+Кейс</button>
             <button class="btn btn-secondary" onclick="doPasxaCase()" style="border-color:rgba(245,184,79,.4);color:#f5b84f;">🐣📦 Пасха+Кейс</button>
+            <button class="btn btn-secondary" onclick="doDropAllBot()" style="border-color:rgba(255,165,0,.4);color:#ffa040;" title="Выбросить предметы (по фильтру ниже)">🎒 Выбросить</button>
+            <input id="drop-filter" class="field-input" style="width:130px;font-size:.72rem;padding:.28rem .5rem;" placeholder="фильтр: dirt,stone…" title="Предметы через запятую (пусто = всё)">
             <button class="btn btn-secondary" onclick="doReconnect()">↺ Реконнект</button>
             <button class="btn btn-secondary" onclick="doClearLogs()">⌫ Очистить</button>
             <button class="btn btn-danger"    onclick="doDelete()">✕ Удалить</button>
@@ -790,14 +799,16 @@ input[type=range] {
       <!-- Batch -->
       <div class="batch-wrap">
         <label>Количество</label>
-        <input type="range" id="m-count" min="1" max="50" value="1"
+        <input type="range" id="m-count" min="1" max="500" value="1"
                oninput="syncBatchCountLabel()">
-        <div class="batch-num" id="m-cval">1</div>
+        <input type="number" id="m-count-num" min="1" max="500" value="1"
+               style="width:60px;background:var(--c-surface2);border:1px solid var(--c-brd);border-radius:.4rem;color:#fff;padding:.2rem .4rem;font-size:.75rem;text-align:center;"
+               oninput="syncBatchCountFromNum()">
       </div>
 
       <div class="field">
         <label>Размер пачки запуска</label>
-        <input class="field-input" id="m-wave-size" type="number" min="1" max="50" value="10">
+        <input class="field-input" id="m-wave-size" type="number" min="1" max="500" value="10">
       </div>
       <div class="field">
         <label>Пауза между пачками (мс)</label>
@@ -1267,6 +1278,20 @@ async function doAfk() {
   catch(e) { Toast.error(e.message); }
 }
 
+async function doRiliks() {
+  const b = getBot(); if (!b) return;
+  try { await api(`/api/bots/${b.id}/riliks`, {method:'POST'}); Toast.info('🏆 Рилики запущены...'); }
+  catch(e) { Toast.error(e.message); }
+}
+async function doRiliksAll() {
+  const count = S.bots.size;
+  if (!count) { Toast.info('Нет активных ботов'); return; }
+  try {
+    await api('/api/bots/riliks/all', {method:'POST'});
+    Toast.success(`🏆 Рилики запущены для ${count} ботов`, '🏆 Рилики');
+  } catch(e) { Toast.error(e.message); }
+}
+
 async function doCase() {
   const b = getBot(); if (!b) return;
   try { await api(`/api/bots/${b.id}/case`,{method:'POST'}); Toast.info('Открываю кейс...'); }
@@ -1344,6 +1369,35 @@ async function doPasxaGrabCaseAll() {
   } catch(e) { Toast.error(e.message); }
 }
 
+function getDropFilter() {
+  // Глобальный фильтр (в навигации) имеет приоритет, потом — фильтр в панели бота
+  const raw = (document.getElementById('drop-filter-global')?.value ||
+               document.getElementById('drop-filter')?.value || '').trim();
+  if (!raw) return null;
+  return raw.split(',').map(s => s.trim()).filter(Boolean);
+}
+async function doDropAllBot() {
+  const b = getBot(); if (!b) return;
+  const items = getDropFilter();
+  try {
+    const r = await api(`/api/bots/${b.id}/drop-all`, {
+      method:'POST', body: JSON.stringify(items ? { items } : {})
+    });
+    Toast.success(`Выброшено: ${r.dropped} стаков${items?` (${items.join(', ')})`:''}`, '🎒');
+  } catch(e) { Toast.error(e.message, '🎒'); }
+}
+async function doDropAllBots() {
+  const online = [...S.bots.values()].filter(b => b.status === 'online').length;
+  if (!online) { Toast.info('Нет онлайн ботов', '🎒'); return; }
+  const items = getDropFilter();
+  try {
+    await api('/api/bots/drop-all/all', {
+      method:'POST', body: JSON.stringify(items ? { items } : {})
+    });
+    Toast.success(`Выбрасываю инвентарь у ${online} ботов${items?` (${items.join(', ')})`:''}`, '🎒 ВЫБРОС');
+  } catch(e) { Toast.error(e.message, '🎒'); }
+}
+
 function renderDrops(b) {
   const panel = el('d-drops');
   const list  = el('d-drops-list');
@@ -1403,7 +1457,14 @@ function openModal()  { el('modal').classList.add('open'); setTimeout(()=>el('m-
 function closeModal() { el('modal').classList.remove('open'); }
 
 function syncBatchCountLabel() {
-  el('m-cval').textContent = el('m-count').value;
+  const v = el('m-count').value;
+  const numEl = el('m-count-num');
+  if (numEl && numEl.value !== v) numEl.value = v;
+}
+function syncBatchCountFromNum() {
+  const v = Math.max(1, Math.min(500, parseInt(el('m-count-num').value)||1));
+  el('m-count-num').value = v;
+  el('m-count').value = v;
 }
 
 function syncBatchNicknameRules() {
@@ -1412,7 +1473,7 @@ function syncBatchNicknameRules() {
   const waveSizeEl = el('m-wave-size');
   if (!countEl || !waveSizeEl) return;
   const singleOnly = base.length >= 16;
-  countEl.max = singleOnly ? '1' : '50';
+  countEl.max = singleOnly ? '1' : '500';
   if (singleOnly && parseInt(countEl.value, 10) > 1) {
     countEl.value = '1';
     Toast.info('Для ника в 16 символов создаётся только один бот', 'Лимит ника');
@@ -1489,8 +1550,8 @@ async function doCreate() {
 
 function resetModal() {
   el('m-user').value=''; el('m-pass').value='';
-  el('m-count').value=1; el('m-cval').textContent='1';
-  el('m-count').max='50';
+  el('m-count').value=1; if(el('m-count-num')) el('m-count-num').value=1;
+  el('m-count').max='500';
   el('m-wave-size').value=10;
   el('m-wave-delay').value=4000;
   el('m-kitfarm').checked=false;
@@ -1893,7 +1954,7 @@ async function doImport() {
       </div>
       <div class="field">
         <label>Ботов одновременно (размер волны)</label>
-        <input class="field-input" id="imp-wave" type="number" value="5" min="1" max="50">
+        <input class="field-input" id="imp-wave" type="number" value="5" min="1" max="500">
       </div>
       <div class="field">
         <label>Задержка между волнами (мс)</label>
@@ -1914,5 +1975,259 @@ async function doImport() {
     </div>
   </div>
 </div>
+
+<!-- ══ PROXY MANAGER MODAL ══════════════════════════════════════════════ -->
+<style>
+.proxy-overlay {
+  position:fixed;inset:0;background:var(--c-overlay);backdrop-filter:var(--c-blur,blur(12px));
+  display:none;align-items:center;justify-content:center;z-index:10600;padding:1.2rem;
+}
+.proxy-overlay.open { display:flex; }
+.proxy-card {
+  width:min(820px,100%);max-height:88vh;display:flex;flex-direction:column;
+  background:var(--c-modal-bg);border:1px solid var(--c-brd-hov);border-radius:1.25rem;
+  box-shadow:var(--c-shadow);overflow:hidden;
+}
+.proxy-hdr {
+  display:flex;align-items:center;gap:.75rem;padding:1rem 1.25rem;
+  border-bottom:1px solid var(--c-brd);flex-shrink:0;flex-wrap:wrap;
+}
+.proxy-title { font-size:1rem;font-weight:700;color:var(--accent);flex:1;min-width:120px; }
+.proxy-stats { font-size:.72rem;color:var(--text3);white-space:nowrap; }
+.proxy-toolbar {
+  display:flex;gap:.5rem;flex-wrap:wrap;padding:.75rem 1.25rem;
+  border-bottom:1px solid var(--c-brd);flex-shrink:0;
+}
+.proxy-toolbar .field-input { font-size:.72rem;padding:.3rem .55rem; }
+.proxy-list {
+  overflow-y:auto;flex:1;padding:.5rem 1.25rem 1rem;
+  display:flex;flex-direction:column;gap:.35rem;
+}
+.proxy-row {
+  display:grid;grid-template-columns:1fr auto auto auto;align-items:center;
+  gap:.5rem;padding:.45rem .65rem;border-radius:.55rem;
+  background:var(--c-surface2);border:1px solid var(--c-brd);font-size:.72rem;
+}
+.proxy-row:hover { border-color:var(--c-brd-hov); }
+.proxy-url { color:var(--text2);word-break:break-all;font-family:monospace;font-size:.7rem; }
+.proxy-dot { width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-right:.25rem; }
+.proxy-dot.alive { background:#39d98a; }
+.proxy-dot.dead  { background:#ff4757; }
+.proxy-dot.unknown { background:rgba(255,255,255,.25); }
+.proxy-limit-input {
+  width:44px;background:transparent;border:1px solid var(--c-brd);border-radius:.35rem;
+  color:var(--text2);text-align:center;padding:.15rem .2rem;font-size:.7rem;
+}
+.proxy-limit-input:focus { outline:none;border-color:var(--accent); }
+.proxy-row-status { display:flex;align-items:center;gap:.2rem;color:var(--text3);white-space:nowrap; }
+.proxy-empty { text-align:center;padding:2rem;color:var(--text3);font-size:.8rem; }
+.proxy-add-area {
+  padding:.75rem 1.25rem;border-top:1px solid var(--c-brd);flex-shrink:0;
+  display:flex;flex-direction:column;gap:.5rem;
+}
+.proxy-add-area textarea { font-size:.72rem;font-family:monospace;resize:vertical; }
+.proxy-progress {
+  font-size:.72rem;color:var(--text3);padding:.25rem 1.25rem;
+  border-top:1px solid var(--c-brd);flex-shrink:0;display:none;
+}
+.proxy-progress.show { display:block; }
+.prg-bar-wrap { background:var(--c-surface2);border-radius:4px;height:4px;margin-top:.3rem; }
+.prg-bar      { background:var(--gradient,var(--accent));height:4px;border-radius:4px;transition:width .3s; }
+</style>
+
+<div class="proxy-overlay" id="proxy-overlay" onclick="if(event.target===this)closeProxyModal()">
+ <div class="proxy-card">
+  <div class="proxy-hdr">
+   <div class="proxy-title">🌐 Прокси-пул</div>
+   <span class="proxy-stats" id="proxy-stats-label">Загрузка…</span>
+   <button class="btn btn-secondary" onclick="fetchProxies()" style="font-size:.7rem;padding:.3rem .75rem;border-color:rgba(99,202,183,.4);color:#63cab7;" title="Скачать с популярных сайтов">⬇ Скачать</button>
+   <button class="btn btn-secondary" onclick="checkAllProxies()" id="proxy-check-btn" style="font-size:.7rem;padding:.3rem .75rem;" title="Проверить работоспособность всех (80 потоков, 3.5с таймаут)">✓ Проверить</button>
+   <button class="btn btn-secondary" onclick="deleteDeadProxies()" style="font-size:.7rem;padding:.3rem .75rem;border-color:rgba(255,71,87,.3);color:#ff6b81;">✕ Удалить мёртвых</button>
+   <button class="btn btn-secondary" onclick="clearAllProxies()" style="font-size:.7rem;padding:.3rem .75rem;">🗑 Очистить</button>
+   <button class="btn btn-secondary" onclick="closeProxyModal()" style="font-size:.7rem;padding:.3rem .75rem;">✕</button>
+  </div>
+  <div class="proxy-progress" id="proxy-progress">
+   <span id="proxy-progress-txt">Проверка…</span>
+   <div class="prg-bar-wrap"><div class="prg-bar" id="proxy-prg-bar" style="width:0%"></div></div>
+  </div>
+  <div class="proxy-list" id="proxy-list"><div class="proxy-empty">Нет прокси. Добавьте вручную или скачайте.</div></div>
+  <div class="proxy-add-area">
+   <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
+    <span style="font-size:.75rem;color:var(--text2);font-weight:600;">Добавить</span>
+    <input class="field-input" id="proxy-limit-new" type="number" min="1" max="100" value="10"
+      style="width:60px;font-size:.72rem;padding:.3rem .45rem;" placeholder="лимит">
+    <span style="font-size:.72rem;color:var(--text3);">ботов / прокси</span>
+   </div>
+   <textarea class="field-input" id="proxy-add-text" rows="3"
+     placeholder="Вставьте список прокси (один на строку):&#10;socks5://1.2.3.4:1080&#10;user:pass@5.6.7.8:1080&#10;1.2.3.4:1080"></textarea>
+   <div style="display:flex;gap:.5rem;">
+    <button class="btn btn-primary" onclick="importProxies()" style="font-size:.75rem;">+ Импортировать</button>
+   </div>
+  </div>
+ </div>
+</div>
+
+<script>
+/* ── PROXY MANAGER ──────────────────────────────────────────────── */
+let proxyData = [];
+
+function openProxyModal() {
+  document.getElementById('proxy-overlay').classList.add('open');
+  loadProxyList();
+}
+function closeProxyModal() {
+  document.getElementById('proxy-overlay').classList.remove('open');
+}
+
+async function loadProxyList() {
+  try {
+    const r = await api('/api/proxies');
+    proxyData = r.proxies || [];
+    renderProxyList();
+    updateProxyStats();
+  } catch(e) { console.error(e); }
+}
+
+function updateProxyStats() {
+  const total  = proxyData.length;
+  const alive  = proxyData.filter(p => p.alive === true).length;
+  const dead   = proxyData.filter(p => p.alive === false).length;
+  const active = proxyData.reduce((s, p) => s + (p.botsActive || 0), 0);
+  document.getElementById('proxy-stats-label').textContent =
+    `Всего: ${total} | ✓ ${alive} | ✗ ${dead} | Ботов: ${active}`;
+}
+
+function renderProxyList() {
+  const list = document.getElementById('proxy-list');
+  if (!proxyData.length) {
+    list.innerHTML = '<div class="proxy-empty">Нет прокси. Добавьте вручную или скачайте.</div>';
+    return;
+  }
+  list.innerHTML = proxyData.map((p, i) => {
+    const dotCls = p.alive === true ? 'alive' : p.alive === false ? 'dead' : 'unknown';
+    const statusTxt = p.alive === true ? '✓ OK'
+                    : p.alive === false ? '✗ Dead'
+                    : '? Unchecked';
+    const ago = p.lastCheck ? `${Math.round((Date.now()-p.lastCheck)/60000)}м назад` : '';
+    return `<div class="proxy-row" id="pr-row-${i}">
+      <div class="proxy-url">
+        <span class="proxy-dot ${dotCls}"></span>${p.url}
+      </div>
+      <div class="proxy-row-status">
+        <span style="color:${p.alive===true?'#39d98a':p.alive===false?'#ff4757':'#aaa'}">${statusTxt}</span>
+        ${ago?`<span style="color:var(--text3);margin-left:.3rem">${ago}</span>`:''}
+        &nbsp;${p.botsActive}/${p.botsLimit}
+      </div>
+      <input class="proxy-limit-input" type="number" min="1" max="200"
+        value="${p.botsLimit}" title="Лимит ботов"
+        onchange="setProxyLimit(${i}, this.value)" onblur="setProxyLimit(${i}, this.value)">
+      <div style="display:flex;gap:.3rem;">
+        <button class="btn btn-secondary" onclick="checkOneProxy(${i})"
+          style="font-size:.65rem;padding:.2rem .5rem;">✓</button>
+        <button class="btn btn-danger" onclick="deleteProxy(${i})"
+          style="font-size:.65rem;padding:.2rem .5rem;">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function importProxies() {
+  const text  = document.getElementById('proxy-add-text').value;
+  const limit = parseInt(document.getElementById('proxy-limit-new').value) || 10;
+  if (!text.trim()) return;
+  try {
+    const r = await api('/api/proxies/import', { method:'POST', body: JSON.stringify({ text, botsLimit: limit }) });
+    Toast.success(`Добавлено: ${r.added} прокси (всего: ${r.total})`, '🌐');
+    document.getElementById('proxy-add-text').value = '';
+    await loadProxyList();
+  } catch(e) { Toast.error(e.message, '🌐'); }
+}
+
+async function fetchProxies() {
+  Toast.info('Скачиваю прокси с источников…', '🌐');
+  try {
+    const r = await api('/api/proxies/fetch', { method:'POST', body: JSON.stringify({ botsLimit: parseInt(document.getElementById('proxy-limit-new').value)||10 }) });
+    Toast.success(`Получено: +${r.added} прокси (всего: ${r.total})`, '🌐');
+    await loadProxyList();
+  } catch(e) { Toast.error(e.message, '🌐'); }
+}
+
+async function checkAllProxies() {
+  const btn = document.getElementById('proxy-check-btn');
+  btn.disabled = true; btn.textContent = '⏳ Проверка…';
+  const prog = document.getElementById('proxy-progress');
+  prog.classList.add('show');
+  document.getElementById('proxy-prg-bar').style.width = '0%';
+  document.getElementById('proxy-progress-txt').textContent = 'Запускаю…';
+  try {
+    await api('/api/proxies/check', { method:'POST' });
+  } catch(e) { Toast.error(e.message, '🌐'); btn.disabled=false; btn.textContent='✓ Проверить'; }
+}
+
+async function checkOneProxy(i) {
+  try {
+    const r = await api(`/api/proxies/${i}/check`, { method:'POST' });
+    proxyData[i] && (proxyData[i].alive = r.alive);
+    renderProxyList();
+    updateProxyStats();
+  } catch(e) { Toast.error(e.message); }
+}
+
+async function setProxyLimit(i, val) {
+  const lim = Math.max(1, Math.min(200, parseInt(val)||10));
+  try {
+    await api(`/api/proxies/${i}`, { method:'PATCH', body: JSON.stringify({ botsLimit: lim }) });
+    if (proxyData[i]) proxyData[i].botsLimit = lim;
+  } catch(e) { Toast.error(e.message); }
+}
+
+async function deleteProxy(i) {
+  try {
+    await api(`/api/proxies/${i}`, { method:'DELETE' });
+    await loadProxyList();
+  } catch(e) { Toast.error(e.message); }
+}
+
+async function deleteDeadProxies() {
+  try {
+    const r = await api('/api/proxies/dead', { method:'DELETE' });
+    Toast.success(`Удалено мёртвых: ${r.removed}`, '🌐');
+    await loadProxyList();
+  } catch(e) { Toast.error(e.message); }
+}
+
+async function clearAllProxies() {
+  if (!confirm('Удалить все прокси?')) return;
+  try {
+    await api('/api/proxies', { method:'DELETE' });
+    Toast.info('Все прокси удалены', '🌐');
+    await loadProxyList();
+  } catch(e) { Toast.error(e.message); }
+}
+
+// Socket.IO events for proxy check progress
+socket.on('proxy:checked', d => {
+  const pct = Math.round((d.done / d.total) * 100);
+  document.getElementById('proxy-prg-bar').style.width = pct + '%';
+  document.getElementById('proxy-progress-txt').textContent =
+    `Проверка ${d.done}/${d.total} — ${d.url} → ${d.alive ? '✓' : '✗'}`;
+  if (proxyData[d.index]) {
+    proxyData[d.index].alive = d.alive;
+    const row = document.getElementById(`pr-row-${d.index}`);
+    if (row) {
+      const dot = row.querySelector('.proxy-dot');
+      if (dot) { dot.className = `proxy-dot ${d.alive?'alive':'dead'}`; }
+    }
+  }
+});
+socket.on('proxy:check-done', d => {
+  const btn = document.getElementById('proxy-check-btn');
+  if (btn) { btn.disabled=false; btn.textContent='✓ Проверить'; }
+  Toast.success(`Проверка завершена: ${d.alive}/${d.total} живых`, '🌐');
+  document.getElementById('proxy-progress').classList.remove('show');
+  loadProxyList();
+});
+</script>
+
 </body>
 </html>
