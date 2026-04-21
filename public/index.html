@@ -1104,12 +1104,23 @@ socket.on('bot:stage', ({id, stage, status}) => {
   renderSidebar();
   if (S.sel===id) { renderHeader(); renderStrip(); }
 });
+// Одиночный лог (обратная совместимость, если сервер старый)
 socket.on('bot:log', ({id, type, text, ts}) => {
   const b = S.bots.get(id); if (!b) return;
   b.logs.push({type,text,ts});
   if (b.logs.length>CLIENT_LOG_LIMIT) b.logs.splice(0, b.logs.length-CLIENT_LOG_LIMIT);
   if (S.sel===id) appendLine({type,text,ts});
   if (bcOpen) bcAppendLine(b.config?.username || id, type, text, ts);
+});
+// Батчевые логи (новый формат — один WS-фрейм вместо N)
+socket.on('bot:logs:batch', (batch) => {
+  for (const {id, type, text, ts} of batch) {
+    const b = S.bots.get(id); if (!b) continue;
+    b.logs.push({type,text,ts});
+    if (b.logs.length>CLIENT_LOG_LIMIT) b.logs.splice(0, b.logs.length-CLIENT_LOG_LIMIT);
+    if (S.sel===id) appendLine({type,text,ts});
+    if (bcOpen) bcAppendLine(b.config?.username || id, type, text, ts);
+  }
 });
 socket.on('bot:riliky', ({id, riliky}) => {
   const b = S.bots.get(id); if (!b) return;

@@ -17,7 +17,21 @@ try { SocksClient = require('socks').SocksClient; } catch {}
 
 const app    = express();
 const server = http.createServer(app);
-const io     = new Server(server);
+const io     = new Server(server, {
+    // ── Производительность Socket.IO ─────────────────────────────────────────
+    // perMessageDeflate по умолчанию включён и вызывает утечку памяти под нагрузкой.
+    // Отключаем — JSON-фреймы с 30+ ботами и так маленькие.
+    perMessageDeflate: false,
+    // HTTP-сжатие тоже отключаем — дашборд не CDN, экономим CPU
+    httpCompression: false,
+    // Пинг: сервер → клиент раз в 25с, таймаут 20с
+    pingTimeout:  20000,
+    pingInterval: 25000,
+    // Ограничиваем размер одного WS-фрейма (защита от случайных больших пакетов)
+    maxHttpBufferSize: 2e6,
+    // CORS: дашборд открывается с того же хоста
+    cors: { origin: '*', methods: ['GET', 'POST'] },
+});
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
@@ -518,14 +532,35 @@ async function scanShopFull(id) {
 }
 
 function compactChunks(mc) {
+    // 1. Стандартный unload всех чанков
     try { mc?.world?.unloadAllChunks?.(); } catch {}
+
+    // 2. Удаляем записи из columns/columnsByKey — prismarine-world хранит чанки тут
     try {
-        if (mc?.entities) {
-            for (const id of Object.keys(mc.entities)) {
-                if (mc.entities[id] !== mc.entity) delete mc.entities[id];
+        const w = mc?.world;
+        if (w) {
+            // prismarine-world v2: Map 'columns'
+            if (w.columns instanceof Map)  { w.columns.clear(); }
+            else if (w.columns && typeof w.columns === 'object') {
+                for (const k of Object.keys(w.columns)) delete w.columns[k];
+            }
+            // некоторые версии используют columnsByKey
+            if (w.columnsByKey && typeof w.columnsByKey === 'object') {
+                for (const k of Object.keys(w.columnsByKey)) delete w.columnsByKey[k];
             }
         }
     } catch {}
+
+    // 3. Чистим entities — оставляем только своего бота
+    try {
+        if (mc?.entities) {
+            for (const eid of Object.keys(mc.entities)) {
+                if (mc.entities[eid] !== mc.entity) delete mc.entities[eid];
+            }
+        }
+    } catch {}
+
+    // 4. Принудительный GC если node запущен с --expose-gc
     if (typeof gc === 'function') { try { gc(); } catch {} }
 }
 function getScoreboardItemText(item) {
@@ -775,8 +810,19 @@ function buildRelicsSummary() {
         leaderboard: tracked,
     };
 }
+// ── Дебаунс-флаши для тяжёлых broadcast-ов ──────────────────────────────────
+// broadcastStats и broadcastRelicsSummary вызываются каскадом при каждом
+// setStage (30 ботов × смена стейджа = 30 вызовов за один тик).
+// Дебаунс 50мс схлопывает все вызовы в ОДИН emit, экономя CPU + трафик.
+let _statsFlushTimer   = null;
+let _relicsFlushTimer  = null;
+
 function broadcastRelicsSummary() {
-    io.emit('relics:summary', buildRelicsSummary());
+    if (_relicsFlushTimer) return;
+    _relicsFlushTimer = setTimeout(() => {
+        _relicsFlushTimer = null;
+        io.emit('relics:summary', buildRelicsSummary());
+    }, 50);
 }
 function emitBotRiliky(id) {
     const b = bots.get(id);
@@ -882,6 +928,20 @@ function handleDisconnect(id, mc, {
 }
 
 // ── Лог и статус ────────────────────────────
+// ── Батч-лог: буферизуем записи и шлём одним фреймом каждые 25мс ────────────
+// Без буферизации при 30 ботах и 5 логах/сек = 150 emit/сек мелкими пакетами.
+// С буферизацией → 40 emit/сек, каждый несёт массив записей (один WS-фрейм).
+const _pendingLogs  = [];
+let   _logFlushTimer = null;
+
+function _flushLogs() {
+    _logFlushTimer = null;
+    if (!_pendingLogs.length) return;
+    const batch = _pendingLogs.splice(0);
+    // bot:logs:batch — массив {id,type,text,ts}; фронтенд слушает оба события
+    io.emit('bot:logs:batch', batch);
+}
+
 function addLog(id, type, text) {
     const b = bots.get(id); if (!b) return;
     const safeText = trimLogText(text);
@@ -889,7 +949,8 @@ function addLog(id, type, text) {
     const entry = { type, text: safeText, ts: Date.now() };
     b.logs.push(entry);
     if (b.logs.length > MAX_LOGS_PER_BOT) b.logs.shift();
-    io.emit('bot:log', { id, ...entry });
+    _pendingLogs.push({ id, ...entry });
+    if (!_logFlushTimer) _logFlushTimer = setTimeout(_flushLogs, 25);
 }
 
 function setStage(id, stage) {
@@ -914,18 +975,27 @@ function setStage(id, stage) {
 }
 
 function broadcastStats() {
+    if (_statsFlushTimer) return;
+    _statsFlushTimer = setTimeout(_sendStats, 50);
+}
+function _sendStats() {
+    _statsFlushTimer = null;
     const all = [...bots.values()];
     const mem = process.memoryUsage();
-    const rilksCasesTotal = all.reduce((s,b) => s + (b.rilksCases||0), 0);
-    const casesGotTotal   = all.reduce((s,b) => s + (b.casesGot||0), 0);
+    let online = 0, offline = 0, banned = 0, rilksCasesTotal = 0, casesGotTotal = 0;
+    for (const b of all) {
+        if (b.status === 'online') online++;
+        else if (b.status === 'banned') banned++;
+        else offline++;
+        rilksCasesTotal += b.rilksCases || 0;
+        casesGotTotal   += b.casesGot   || 0;
+    }
     io.emit('stats', {
-        total:   all.length,
-        online:  all.filter(b => b.status === 'online').length,
-        offline: all.filter(b => b.status === 'offline' || b.status === 'error').length,
-        banned:  all.filter(b => b.status === 'banned').length,
-        ram:     Math.round(mem.rss / 1024 / 1024),
-        heap:    Math.round(mem.heapUsed / 1024 / 1024),
-        cpu:     currentCpu,
+        total:  all.length,
+        online, offline, banned,
+        ram:    Math.round(mem.rss / 1024 / 1024),
+        heap:   Math.round(mem.heapUsed / 1024 / 1024),
+        cpu:    currentCpu,
         rilksCasesTotal,
         casesGotTotal,
     });
@@ -944,21 +1014,26 @@ function sampleCpu() {
 }
 
 // Живая статистика каждые 3 сек
-setInterval(() => {
-    const mem = process.memoryUsage();
-    io.emit('stats:live', {
-        ram:  Math.round(mem.rss / 1024 / 1024),
-        heap: Math.round(mem.heapUsed / 1024 / 1024),
-        cpu:  sampleCpu(),
-        bots: [...bots.entries()].map(([id, b]) => ({
-            id,
-            uptime:    b.connectedAt ? Math.floor((Date.now() - b.connectedAt) / 1000) : 0,
-            nextFree:  calcNextFreeMs(b),
-            stage:     b.stage,
-            riliky:    Number.isFinite(b.riliky) ? b.riliky : null,
-        }))
-    });
-}, LIVE_STATS_INTERVAL_MS);
+// .unref() — Node.js не блокирует завершение процесса из-за этого таймера
+{
+    const liveTimer = setInterval(() => {
+        if (io.engine.clientsCount === 0) return; // нет клиентов — ничего не шлём
+        const mem = process.memoryUsage();
+        io.emit('stats:live', {
+            ram:  Math.round(mem.rss  / 1024 / 1024),
+            heap: Math.round(mem.heapUsed / 1024 / 1024),
+            cpu:  sampleCpu(),
+            bots: [...bots.entries()].map(([id, b]) => ({
+                id,
+                uptime:   b.connectedAt ? Math.floor((Date.now() - b.connectedAt) / 1000) : 0,
+                nextFree: calcNextFreeMs(b),
+                stage:    b.stage,
+                riliky:   Number.isFinite(b.riliky) ? b.riliky : null,
+            })),
+        });
+    }, LIVE_STATS_INTERVAL_MS);
+    liveTimer.unref?.();
+}
 
 function calcNextFreeMs(b) {
     if (!b.griefJoinedAt || b.nextFreeIndex >= FREE_REWARDS_MIN.length) return null;
@@ -1133,7 +1208,10 @@ function scheduleAuth(id, mode, prompt = '', delay = jitter(DEFAULT_AUTH_DELAY_M
 function sendAuth(id, mode, prompt = '') {
     const b = bots.get(id);
     if (!b?.mc || b.status === 'banned' || b.config.autoAuth === false) return;
-    if (mode === 'login' && b.auth.authenticated) return;
+    // Проверка для ОБОИХ режимов — ранее только login проверял authenticated.
+    // Без этого бот мог отправить /register на гриф-сервер уже будучи авторизованным
+    // (если таймер сработал позже markAuthenticated), что вело к кику сервером.
+    if (b.auth.authenticated) return;
     const prefix = getAuthPrefix(mode, prompt);
     const pass   = b.config.authPassword || b.config.username;
     const cmd    = mode === 'register' ? `${prefix} ${pass} ${pass}` : `${prefix} ${pass}`;
@@ -1238,6 +1316,7 @@ function createBot(id, config, opts = {}) {
     b.chunkTimer = setInterval(() => {
         compactChunks(mc);
     }, S.chunkGcMs);
+    b.chunkTimer.unref?.();
 
     // ── БАН: редирект Velocity ────────────────
     mc._client.on('transfer', packet => {
@@ -1523,7 +1602,6 @@ async function goAfk(id) {
     const mc  = b.mc;
     addLog(id, LOG.ACTION, '/warp afk — иду в афк-пул');
     try {
-        const startPos = mc.entity?.position?.clone?.();
         mc.chat('/warp afk');
         // ждём телепорт по факту смещения или по сообщению чата
         const warped = await Promise.race([
@@ -1532,16 +1610,14 @@ async function goAfk(id) {
         ]);
         if (!warped) addLog(id, LOG.WARN, '/warp afk — телепорт не подтверждён, идём дальше');
         await sleep(200);
-        mc.physicsEnabled = true;
+        // walkForward теперь использует walkDirect (5 Гц), physicsEnabled не нужен
         const walked = await walkForward(mc, S.afkWalkMs);
         b.afkDone = true;
         setStage(id, STAGE.AFK);
         addLog(id, LOG.SUCCESS, `В афк-пуле, прошёл ${walked.toFixed(1)} блока`);
         scheduleWorldCompaction(id);
-    } finally {
-        mc.setControlState('forward', false);
-        mc.setControlState('sprint', false);
-        mc.physicsEnabled = false;
+    } catch(e) {
+        addLog(id, LOG.ERROR, 'goAfk: ' + e.message);
     }
 }
 function hDist(a, b) {
@@ -1559,15 +1635,46 @@ async function waitTeleport(mc, startPos, timeout) {
     }
     return false;
 }
+// ── Прямая запись позиции (5 Гц) вместо физики (20 Гц) ─────────────────────
+// Физический движок mc.physicsEnabled=true генерирует 20 пакетов/сек.
+// С 8+ ботами одновременно → 160+ пакетов/сек от одного IP → античит кикает.
+// Этот метод шлёт 1 пакет каждые 200мс (≈5 Гц) — в 4 раза меньше нагрузка.
+// yaw — радианы (mineflayer: 0=юг/+Z, -PI/2=восток/+X, PI/2=запад/-X)
+async function walkDirect(mc, yaw, blocks) {
+    if (!mc?.entity) return 0;
+    const STEP_MS  = 200;                       // период пакетов = 5 Гц
+    const SPEED    = 5.6;                       // скорость спринта (блоки/сек)
+    const stepDist = SPEED * (STEP_MS / 1000); // 1.12 блока за шаг
+    const dx = -Math.sin(yaw);
+    const dz =  Math.cos(yaw);
+    const startX = mc.entity.position.x;
+    const startZ = mc.entity.position.z;
+    const y      = mc.entity.position.y;
+    const nSteps = Math.ceil(blocks / stepDist);
+
+    for (let i = 1; i <= nSteps; i++) {
+        if (!mc.entity) break;
+        const traveled = Math.min(i * stepDist, blocks);
+        mc.entity.position.x = startX + dx * traveled;
+        mc.entity.position.z = startZ + dz * traveled;
+        try {
+            mc._client.write('position', {
+                x: mc.entity.position.x,
+                y,
+                z: mc.entity.position.z,
+                onGround: true
+            });
+        } catch {}
+        if (i < nSteps) await sleep(STEP_MS);
+    }
+    return hDist(mc.entity?.position, { x: startX, z: startZ });
+}
+
 async function walkForward(mc, dur) {
-    const start = mc.entity?.position?.clone?.(); if (!start) return 0;
-    mc.setControlState('sprint', true);
-    mc.setControlState('forward', true);
-    await sleep(dur);
-    mc.setControlState('forward', false);
-    mc.setControlState('sprint', false);
-    await sleep(250);
-    return hDist(mc.entity?.position, start);
+    if (!mc?.entity) return 0;
+    const yaw    = mc.entity.yaw ?? 0;
+    const blocks = 5.6 * (dur / 1000);   // sprint 5.6 бл/сек
+    return walkDirect(mc, yaw, blocks);
 }
 
 // ── Анти-таймаут: лёгкий keep-alive через _client.write('keep_alive') ──────
@@ -1626,13 +1733,16 @@ function markEnteredGrief(id) {
     if (b.config.autoFree  !== false) scheduleRewards(id);
     if (b.config.autoPasxa !== false) schedulePasxa(id);
 
-    // AFK — запускаем сразу после входа на гриф, а не через 20 сек от спауна
+    // AFK — запускаем сразу после входа на гриф.
+    // Разброс 0-4 сек чтобы боты одной волны не ходили одновременно
+    // (иначе всех вместе кикает античитом при пачечном хождении)
     if (b.config.autoAfk && !b.afkStarted) {
         b.afkStarted = true;
         if (b.afkTimer) { clearTimeout(b.afkTimer); b.afkTimer = null; }
+        const afkDelay = 500 + Math.floor(Math.random() * 4000); // 0.5–4.5 сек
         b.afkTimer = setTimeout(() => {
             goAfk(id).catch(e => addLog(id, LOG.ERROR, 'AFK: ' + e.message));
-        }, 500);
+        }, afkDelay);
     }
 
     setTimeout(() => tryStartKitFarm(id), 500);
@@ -1959,27 +2069,19 @@ async function doOpenCase(id) {
         await sleep(800);
 
         // 2. Маршрут: налево 90° → 6 блоков → направо 90° → 5 блоков
+        // walkDirect вместо physicsEnabled — 5 Гц вместо 20 Гц (нет флуда пакетов позиции)
         const initialYaw = mc.entity?.yaw ?? 0;
-        mc.physicsEnabled = true;
-        mc.setControlState('sprint', true);
+        const yawLeft    = initialYaw - Math.PI / 2; // налево 90°
 
-        // Повернуть налево 90° и пройти 6 блоков
-        mc.look(initialYaw - Math.PI / 2, 0, true);
-        await sleep(250);
-        mc.setControlState('forward', true);
-        await sleep(1150);   // ~6 блоков вперёд (спринт ~5.2 бл/с)
-        mc.setControlState('forward', false);
+        mc.look(yawLeft, 0, true);
+        await sleep(100);
+        await walkDirect(mc, yawLeft, 6);  // 6 блоков влево
         await sleep(150);
 
-        // Повернуть направо 90° (возврат к initialYaw) и пройти 5 блоков
         mc.look(initialYaw, 0, true);
-        await sleep(250);
-        mc.setControlState('forward', true);
-        await sleep(970);    // ~5 блоков вперёд
-        mc.setControlState('forward', false);
-        mc.setControlState('sprint', false);
-        mc.physicsEnabled = false;
-        await sleep(300);
+        await sleep(100);
+        await walkDirect(mc, initialYaw, 5); // 5 блоков вперёд
+        await sleep(200);
 
         // 3. Вспомогательная функция поиска шалкера
         const findShulker = () => {
